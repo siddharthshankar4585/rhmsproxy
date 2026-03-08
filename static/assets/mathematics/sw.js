@@ -141,11 +141,12 @@ class UVServiceWorker extends EventEmitter {
     const t = {},
       r = JSON.parse(e.headers.get("x-bare-headers"));
     for (const e in r) t[e.toLowerCase()] = r[e];
+    const s = +e.headers.get("x-bare-status") || 200;
     return {
       headers: t,
-      status: +e.headers.get("x-bare-status"),
+      status: s,
       statusText: e.headers.get("x-bare-status-text"),
-      body: this.statusCode.empty.includes(+e.headers.get("x-bare-status"))
+      body: this.statusCode.empty.includes(s)
         ? null
         : e.body,
     };

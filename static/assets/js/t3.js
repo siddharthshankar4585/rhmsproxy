@@ -3,19 +3,37 @@ window.addEventListener("load", () => {
   navigator.serviceWorker.register("../sw.js?v=2025-04-15", { scope: "/a/" });
   const form = document.getElementById("fv");
   const input = document.getElementById("input");
+  
+  // Check if there's a URL in sessionStorage (from search redirect)
+  const goUrl = sessionStorage.getItem("GoUrl");
+  if (goUrl) {
+    const iframeContainer = document.getElementById("frame-container");
+    const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
+    if (activeIframe) {
+      activeIframe.src = `/a/${goUrl}`;
+    }
+    sessionStorage.removeItem("GoUrl");
+  }
+  
   if (form && input) {
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const formValue = input.value.trim();
-      const url = isUrl(formValue) ? prependHttps(formValue) : `https://duckduckgo.com/?q=${formValue}`;
+      const url = isUrl(formValue) ? prependHttps(formValue) : `https://duckduckgo.com/?q=${encodeURIComponent(formValue)}`;
       processUrl(url);
     });
   }
   function processUrl(url) {
-    sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(url));
+    const encoded = __uv$config.encodeUrl(url);
+    if (shouldUseDynamic(url)) {
+      window.location.href = `/a/${encoded}`;
+      return;
+    }
+
+    sessionStorage.setItem("GoUrl", encoded);
     const iframeContainer = document.getElementById("frame-container");
     const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
-    activeIframe.src = `/a/${__uv$config.encodeUrl(url)}`;
+    activeIframe.src = `/a/${encoded}`;
     activeIframe.dataset.tabUrl = url;
     input.value = url;
     console.log(activeIframe.dataset.tabUrl);
@@ -32,6 +50,15 @@ window.addEventListener("load", () => {
     }
     return url;
   }
+
+  function shouldUseDynamic(url) {
+    try {
+      const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+      return hostname === "poxel.io" || hostname.endsWith(".poxel.io");
+    } catch {
+      return false;
+    }
+  }
 });
 document.addEventListener("DOMContentLoaded", event => {
   const addTabButton = document.getElementById("add-tab");
@@ -46,7 +73,8 @@ document.addEventListener("DOMContentLoaded", event => {
     const newTab = document.createElement("li");
     const tabTitle = document.createElement("span");
     const newIframe = document.createElement("iframe");
-    newIframe.sandbox = "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-presentation allow-storage-access-by-user-activation";
+    // Some anti-bot/verification pages require popup flows and user-initiated top navigation.
+    newIframe.sandbox = "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-presentation allow-storage-access-by-user-activation allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
     // When Top Navigation is not allowed links with the "top" value will be entirely blocked, if we allow Top Navigation it will overwrite the tab, which is obviously not wanted.
     tabTitle.textContent = `New Tab ${tabCounter}`;
     tabTitle.className = "t";

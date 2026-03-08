@@ -1,25 +1,24 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Poppins&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Story+Script&display=swap");
 
 :root {
    /* Background Variables */
-   --background-image: url("/./assets/media/background/full-main.png"); /* Background Image */
+   --background-image: none; /* Background Image */
    --backdrop-filter: blur(10px) brightness(80%); /* Nav Backdrop filter */
-   --background-nav: rgba(255, 255, 255, 0.02); /* Nav Background */
-   --background-color: #222; /* Main Background Color */
-   --background-input: #4545459e; /* Input Field Background Color */
-   --background-column: #353535; /* Background for Apps Container */
-   --background-settings: #2a2a2a; /* Settings Card Background */
-   --background-buttons: #333; /* Button Background Color */
-   --tab-active-background: #444; /* Accent Color for Tabs */
+   --background-nav: #1EC7B0; /* Nav Background */
+   --background-color: #1EC7B0; /* Main Background Color */
+   --background-input: #15a399; /* Input Field Background Color */
+   --background-column: #1EC7B0; /* Background for Apps Container */
+   --background-settings: #1EC7B0; /* Settings Card Background */
+   --background-buttons: #23d9c3; /* Button Background Color */
+   --tab-active-background: #2ee0cb; /* Accent Color for Tabs */
    --tab-inactive-background: ; /* Background Color for Tabs Not In Use */
-   --slider-active-background: #4caf50; /* Active Slider Background Color */
-   --slider-inactive-background: #ccc; /*  Slider Background Color */
+   --slider-active-background: #2ee0cb; /* Active Slider Background Color */
+   --slider-inactive-background: #2ee0cb; /* Slider Background Color */
    --nav-image: url("/./assets/media/favicon/main.png"); /* Nav Logo */
    /* Text Variables */
-   --text-primary: #fff; /* Primary Text Color */
-   --text-dark: #555; /* Dark Text Color for Error Page, Scrollbar, and Particles */
-   --text-placeholder: #aaa; /* Placeholder Text Color */
+   --text-primary: #ffffff; /* Primary Text Color */
+   --text-dark: #0f5f57; /* Dark Text Color for Error Page, Scrollbar, and Particles */
+   --text-placeholder: #00ffff; /* Placeholder Text Color */
    /* Other Variables */
    --save-button: #4caf50; /* Save Button, Typically Green */
    --reset-button: #f44336; /* Reset Button, Typically Red */
@@ -49,14 +48,16 @@
 }
 
 body {
-   font-family: "Inter", sans-serif;
+   font-family: "Story Script", cursive;
    text-decoration: none;
-   background: var(--background-image);
+   background-color: var(--background-color);
+   background-image: var(--background-image);
    height: 100%;
    background-position: center;
    background-repeat: no-repeat;
    background-size: cover;
    background-attachment: fixed;
+   cursor: url('/assets/media/cursors/image.png') 12 12, auto;
 }
 
 ::placeholder {
@@ -66,7 +67,7 @@ body {
 
 .main {
    letter-spacing: 0px;
-   font-family: "Inter", sans-serif;
+   font-family: "Story Script", cursive;
    width: 99%;
    display: flex;
    flex-direction: column;
