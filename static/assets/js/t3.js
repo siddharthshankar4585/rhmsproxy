@@ -11,8 +11,8 @@ window.addEventListener("load", () => {
     const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
     if (activeIframe) {
       activeIframe.src = `/a/${goUrl}`;
+      sessionStorage.removeItem("GoUrl");
     }
-    sessionStorage.removeItem("GoUrl");
   }
   
   if (form && input) {
@@ -24,6 +24,12 @@ window.addEventListener("load", () => {
     });
   }
   function processUrl(url) {
+    const blockedReason = getBlockedReason(url);
+    if (blockedReason) {
+      alert(blockedReason);
+      return;
+    }
+
     const encoded = __uv$config.encodeUrl(url);
     if (shouldUseDynamic(url)) {
       window.location.href = `/a/${encoded}`;
@@ -59,12 +65,79 @@ window.addEventListener("load", () => {
       return false;
     }
   }
+
+  function getBlockedReason(url) {
+    try {
+      const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+      if (hostname === "poxel.io" || hostname.endsWith(".poxel.io")) {
+        return "poxel.io is currently blocked by anti-bot/security verification and may not work on this proxy.";
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  }
 });
 document.addEventListener("DOMContentLoaded", event => {
   const addTabButton = document.getElementById("add-tab");
   const tabList = document.getElementById("tab-list");
   const iframeContainer = document.getElementById("frame-container");
   let tabCounter = 1;
+
+  function normalizeAdminHijackUrl(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) {
+      return "";
+    }
+    if (/^http(s?):\/\//.test(trimmed)) {
+      return trimmed;
+    }
+    if (trimmed.includes(".")) {
+      return `https://${trimmed}`;
+    }
+    return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
+  }
+
+  function openAdminHijackUrl(rawUrl) {
+    const normalizedUrl = normalizeAdminHijackUrl(rawUrl);
+    if (!normalizedUrl) {
+      return;
+    }
+
+    let blockedReason = "";
+    try {
+      const hostname = new URL(normalizedUrl).hostname.replace(/^www\./, "").toLowerCase();
+      if (hostname === "poxel.io" || hostname.endsWith(".poxel.io")) {
+        blockedReason = "poxel.io is currently blocked by anti-bot/security verification and may not work on this proxy.";
+      }
+    } catch {
+      blockedReason = "";
+    }
+
+    if (blockedReason) {
+      alert(blockedReason);
+      return;
+    }
+
+    const encoded = __uv$config.encodeUrl(normalizedUrl);
+    const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
+    const input = document.getElementById("input");
+    if (input) {
+      input.value = normalizedUrl;
+    }
+
+    if (activeIframe) {
+      activeIframe.src = `/a/${encoded}`;
+      activeIframe.dataset.tabUrl = normalizedUrl;
+      return;
+    }
+
+    sessionStorage.setItem("GoUrl", encoded);
+    createNewTab();
+  }
+
+  window.adminOpenProxyUrl = openAdminHijackUrl;
+
   addTabButton.addEventListener("click", () => {
     createNewTab();
     Load();
@@ -126,6 +199,7 @@ document.addEventListener("DOMContentLoaded", event => {
         } else {
           newIframe.src = `${window.location.origin}/a/${goUrl}`;
         }
+        sessionStorage.removeItem("GoUrl");
       } else {
         newIframe.src = "/";
       }
@@ -139,6 +213,7 @@ document.addEventListener("DOMContentLoaded", event => {
         } else {
           newIframe.src = `${window.location.origin}/a/${goUrl}`;
         }
+        sessionStorage.removeItem("GoUrl");
       } else {
         newIframe.src = "/";
       }

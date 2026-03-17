@@ -10,6 +10,11 @@ const dynamic = new Dynamic();
 const userKey = new URL(location).searchParams.get("userkey");
 self.dynamic = dynamic;
 
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", event => {
+  event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener("fetch", event => {
   event.respondWith(
     (async () => {

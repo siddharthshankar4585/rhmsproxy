@@ -41,6 +41,12 @@ function processUrl(value, path) {
     url = `https://${url}`;
   }
 
+  const blockedReason = getBlockedReason(url);
+  if (blockedReason) {
+    alert(blockedReason);
+    return;
+  }
+
   sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(url));
   const dy = localStorage.getItem("dy");
   const forceDynamic = shouldUseDynamic(url);
@@ -82,6 +88,18 @@ function shouldUseDynamic(url) {
   }
 }
 
+function getBlockedReason(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    if (hostname === "poxel.io" || hostname.endsWith(".poxel.io")) {
+      return "poxel.io is currently blocked by anti-bot/security verification and may not work on this proxy.";
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 function buildSearchUrl(query, engine) {
   const fallback = "https://duckduckgo.com/?q=";
   const safeQuery = encodeURIComponent(query.trim());
@@ -108,3 +126,5 @@ function buildSearchUrl(query, engine) {
     return `${fallback}${safeQuery}`;
   }
 }
+
+

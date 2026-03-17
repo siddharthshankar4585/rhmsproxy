@@ -208,3 +208,66 @@ function getRandomUrl() {
 function randRange(min, max) {
   return Math.floor(Math.random() * (max - min) + min);
 }
+
+const StatsE = document.getElementById("live-stats");
+
+function getVisitorId() {
+  let visitorId = localStorage.getItem("visitorId");
+  if (!visitorId) {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      visitorId = crypto.randomUUID().replace(/[^a-zA-Z0-9-_]/g, "");
+    } else {
+      visitorId = `v${Date.now()}${Math.random().toString(36).slice(2, 10)}`;
+    }
+    localStorage.setItem("visitorId", visitorId);
+  }
+  return visitorId;
+}
+
+async function postStats(url, payload) {
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    });
+  } catch {
+    // Ignore transient network failures.
+  }
+}
+
+async function refreshStats() {
+  if (!StatsE) {
+    return;
+  }
+  try {
+    const res = await fetch("/api/stats", { cache: "no-store" });
+    if (!res.ok) {
+      return;
+    }
+    const stats = await res.json();
+    StatsE.innerText = `Online now: ${stats.onlineUsers} | Opened today: ${stats.openedToday}`;
+  } catch {
+    StatsE.innerText = "Online now: -- | Opened today: --";
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  if (!StatsE) {
+    return;
+  }
+
+  const visitorId = getVisitorId();
+  postStats("/api/stats/open", { visitorId });
+  postStats("/api/stats/heartbeat", { visitorId });
+  refreshStats();
+
+  setInterval(() => {
+    postStats("/api/stats/heartbeat", { visitorId });
+  }, 25000);
+
+  setInterval(() => {
+    refreshStats();
+  }, 10000);
+});
