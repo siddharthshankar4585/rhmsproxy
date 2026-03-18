@@ -1,0 +1,77 @@
+[2026-03-12 04:00:08] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-12 04:00:08] [watchdog] Press Ctrl+C to stop.
+nohup: ignoring input
+[2026-03-13 03:41:44] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-13 03:41:44] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-13 03:41:44] [watchdog] Press Ctrl+C to stop.
+[2026-03-13 03:41:44] [watchdog] Press Ctrl+C to stop.
+[2026-03-13 03:41:44] [watchdog] Using start command: pnpm start
+[2026-03-13 03:41:44] [watchdog] Using start command: pnpm start
+
+> interstellar@5.2.5 start /workspaces/Interstellar
+> node index.js
+
+🚀 Starting server...
+🌍 Server is running on http://localhost:8080
+[2026-03-14 01:13:19] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-14 01:13:19] [watchdog] Press Ctrl+C to stop.
+[2026-03-14 01:13:19] [watchdog] Using start command: pnpm start
+[2026-03-14 01:17:30] [watchdog] Server crashed with code 137. Restarting in 2s...
+[2026-03-14 01:17:31] [watchdog] Watchdog already running with PID 2589. Exiting duplicate launcher.
+[2026-03-14 01:29:21] [watchdog] Server crashed with code 137. Restarting in 2s...
+[2026-03-14 01:29:22] [watchdog] Watchdog already running with PID 2589. Exiting duplicate launcher.
+[2026-03-14 23:27:56] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-14 23:27:56] [watchdog] Press Ctrl+C to stop.
+[2026-03-14 23:27:57] [watchdog] Using start command: pnpm start
+[2026-03-14 23:35:10] [watchdog] Stopping watchdog by user request.
+[2026-03-14 23:35:12] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-14 23:35:12] [watchdog] Press Ctrl+C to stop.
+[2026-03-14 23:35:12] [watchdog] Using start command: pnpm start
+[2026-03-14 23:49:31] [watchdog] Stopping watchdog by user request.
+[2026-03-14 23:49:33] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-14 23:49:33] [watchdog] Press Ctrl+C to stop.
+[2026-03-14 23:49:33] [watchdog] Using start command: pnpm start
+[2026-03-14 23:52:05] [watchdog] Stopping watchdog by user request.
+[2026-03-14 23:52:07] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-14 23:52:07] [watchdog] Press Ctrl+C to stop.
+[2026-03-14 23:52:07] [watchdog] Using start command: pnpm start
+[2026-03-14 23:57:06] [watchdog] Stopping watchdog by user request.
+[2026-03-14 23:57:08] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-14 23:57:08] [watchdog] Press Ctrl+C to stop.
+[2026-03-14 23:57:08] [watchdog] Using start command: pnpm start
+[2026-03-15 00:07:50] [watchdog] Stopping watchdog by user request.
+[2026-03-15 00:07:52] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-15 00:07:52] [watchdog] Press Ctrl+C to stop.
+[2026-03-15 00:07:52] [watchdog] Using start command: pnpm start
+[2026-03-15 00:14:14] [watchdog] Stopping watchdog by user request.
+[2026-03-15 00:14:16] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-15 00:14:16] [watchdog] Press Ctrl+C to stop.
+[2026-03-15 00:14:16] [watchdog] Using start command: pnpm start
+[2026-03-15 00:21:49] [watchdog] Stopping watchdog by user request.
+[2026-03-15 00:21:51] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-15 00:21:51] [watchdog] Press Ctrl+C to stop.
+[2026-03-15 00:21:52] [watchdog] Using start command: pnpm start
+[2026-03-15 00:27:43] [watchdog] Stopping watchdog by user request.
+[2026-03-15 00:27:45] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-15 00:27:45] [watchdog] Press Ctrl+C to stop.
+[2026-03-15 00:27:45] [watchdog] Using start command: pnpm start
+[2026-03-15 00:32:37] [watchdog] Stopping watchdog by user request.
+[2026-03-15 00:32:39] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-15 00:32:39] [watchdog] Press Ctrl+C to stop.
+[2026-03-15 00:32:39] [watchdog] Using start command: pnpm start
+[2026-03-15 00:37:48] [watchdog] Stopping watchdog by user request.
+[2026-03-15 00:37:49] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-15 00:37:49] [watchdog] Press Ctrl+C to stop.
+[2026-03-15 00:37:49] [watchdog] Using start command: pnpm start
+[2026-03-15 00:48:13] [watchdog] Stopping watchdog by user request.
+[2026-03-15 00:48:14] [watchdog] Starting Interstellar with auto-restart on :8080
+[2026-03-15 00:48:14] [watchdog] Press Ctrl+C to stop.
+[2026-03-15 00:48:14] [watchdog] Using start command: pnpm start
+[2026-03-15 00:54:07] [watchdog] Server crashed with code 143. Restarting in 2s...
+[2026-03-15 00:54:08] [watchdog] Watchdog already running with PID 47846. Exiting duplicate launcher.
+[2026-03-15 01:20:45] [watchdog] Server crashed with code 143. Restarting in 2s...
+[2026-03-15 01:20:54] [watchdog] Server crashed with code 143. Restarting in 2s...
+[2026-03-15 01:27:04] [watchdog] Server crashed with code 143. Restarting in 2s...
+[2026-03-15 01:31:39] [watchdog] Server crashed with code 143. Restarting in 2s...
+[2026-03-15 01:35:31] [watchdog] Server crashed with code 143. Restarting in 2s...
+[2026-03-15 01:47:10] [watchdog] Server crashed with code 143. Restarting in 2s...
