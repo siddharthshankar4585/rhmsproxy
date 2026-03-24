@@ -47,6 +47,11 @@ function processUrl(value, path) {
     return;
   }
 
+  if (shouldBypassProxyOnHost()) {
+    window.location.href = url;
+    return;
+  }
+
   sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(url));
   const dy = localStorage.getItem("dy");
   const forceDynamic = shouldUseDynamic(url);
@@ -125,6 +130,11 @@ function buildSearchUrl(query, engine) {
   } catch {
     return `${fallback}${safeQuery}`;
   }
+}
+
+function shouldBypassProxyOnHost() {
+  const host = window.location.hostname.toLowerCase();
+  return host.endsWith(".vercel.app");
 }
 
 

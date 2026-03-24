@@ -30,6 +30,11 @@ window.addEventListener("load", () => {
       return;
     }
 
+    if (shouldBypassProxyOnHost()) {
+      window.location.href = url;
+      return;
+    }
+
     const encoded = __uv$config.encodeUrl(url);
     if (shouldUseDynamic(url)) {
       window.location.href = `/a/${encoded}`;
@@ -119,6 +124,11 @@ document.addEventListener("DOMContentLoaded", event => {
       return;
     }
 
+    if (shouldBypassProxyOnHost()) {
+      window.location.href = normalizedUrl;
+      return;
+    }
+
     const encoded = __uv$config.encodeUrl(normalizedUrl);
     const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
     const input = document.getElementById("input");
@@ -137,6 +147,11 @@ document.addEventListener("DOMContentLoaded", event => {
   }
 
   window.adminOpenProxyUrl = openAdminHijackUrl;
+
+  function shouldBypassProxyOnHost() {
+    const host = window.location.hostname.toLowerCase();
+    return host.endsWith(".vercel.app");
+  }
 
   addTabButton.addEventListener("click", () => {
     createNewTab();
