@@ -1,4 +1,5 @@
 {
+  "task.allowAutomaticTasks": "on",
   "files.autoSave": "afterDelay",
   "files.autoSaveDelay": 0,
   "editor.formatOnSave": true,

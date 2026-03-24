@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node index.js",
+    "start:watchdog": "bash ./scripts/watchdog.sh",
     "format": "pnpm biome format --write .",
     "precommit": "pnpm run format && pnpm biome check --write .",
     "lint": "biome lint --write ."
@@ -26,7 +27,8 @@
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.2.2"
+    "@biomejs/biome": "2.2.2",
+    "sharp": "^0.34.5"
   },
   "packageManager": "pnpm@9.10.0"
 }

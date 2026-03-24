@@ -12,6 +12,1444 @@ try {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  let hasLoadedEffects = false;
+  let lastConfettiVersion = 0;
+  let lastJumpscareVersion = 0;
+  let lastClientRefreshVersion = 0;
+  let confettiIntervalId = null;
+  let dismissedPopupVersion = null;
+  let weatherFlashIntervalId = null;
+  let weatherCurrentEffect = "";
+  let chatPollIntervalId = null;
+  let lastRenderedChatMessageId = 0;
+
+  function randomBetween(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function getChatVisitorId() {
+    let visitorId = localStorage.getItem("visitorId");
+    if (!visitorId) {
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        visitorId = crypto.randomUUID().replace(/[^a-zA-Z0-9-_]/g, "");
+      } else {
+        visitorId = `v${Date.now()}${Math.random().toString(36).slice(2, 10)}`;
+      }
+      localStorage.setItem("visitorId", visitorId);
+    }
+    return visitorId;
+  }
+
+  function getSavedChatName() {
+    return String(localStorage.getItem("proxyChatName") || "").trim();
+  }
+
+  function sanitizeLocalChatName(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 24);
+  }
+
+  function setChatStatus(message, isError = false) {
+    const status = document.getElementById("proxy-chat-status");
+    if (!status) {
+      return;
+    }
+    status.textContent = message;
+    status.classList.toggle("error", isError);
+  }
+
+  function updateChatComposerState() {
+    const name = getSavedChatName();
+    const badge = document.getElementById("proxy-chat-name-badge");
+    const nameInput = document.getElementById("proxy-chat-name-input");
+    const messageInput = document.getElementById("proxy-chat-message-input");
+    const sendButton = document.getElementById("proxy-chat-send");
+
+    if (badge) {
+      badge.textContent = name ? `Chatting as ${name}` : "Pick a name to join";
+    }
+    if (nameInput && !nameInput.matches(":focus")) {
+      nameInput.value = name;
+    }
+    if (messageInput) {
+      messageInput.disabled = !name;
+      messageInput.placeholder = name ? "Send a message" : "Pick a name first";
+    }
+    if (sendButton) {
+      sendButton.disabled = !name;
+    }
+  }
+
+  function formatChatTime(timestamp) {
+    try {
+      return new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    } catch {
+      return "now";
+    }
+  }
+
+  function renderChatMessages(messages) {
+    const list = document.getElementById("proxy-chat-messages");
+    if (!list) {
+      return;
+    }
+
+    const ownName = getSavedChatName();
+    const shouldStickToBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 36;
+    list.replaceChildren();
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "proxy-chat-empty";
+      empty.textContent = "Nobody has said anything yet.";
+      list.appendChild(empty);
+      lastRenderedChatMessageId = 0;
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const message of messages) {
+      const isSystem = message.roleTag === "SYSTEM" || message.name === "SYSTEM";
+      const item = document.createElement("div");
+      item.className = "proxy-chat-message";
+      if (isSystem) {
+        item.classList.add("system");
+      }
+      if (ownName && message.name === ownName) {
+        item.classList.add("own");
+      }
+
+      const meta = document.createElement("div");
+      meta.className = "proxy-chat-meta";
+
+      const authorWrap = document.createElement("div");
+      authorWrap.className = "proxy-chat-author-wrap";
+
+      const author = document.createElement("span");
+      author.className = "proxy-chat-author";
+      author.textContent = isSystem ? "<SYSTEM>" : (message.name || "Unknown");
+      if (message.color) {
+        author.style.color = message.color;
+      }
+
+      authorWrap.appendChild(author);
+
+      if (message.roleTag && !isSystem) {
+        const tag = document.createElement("span");
+        tag.className = "proxy-chat-tag";
+        tag.textContent = message.roleTag;
+        if (message.color) {
+          tag.style.borderColor = message.color;
+          tag.style.color = message.color;
+          tag.style.background = `${message.color}18`;
+        }
+        authorWrap.appendChild(tag);
+      }
+
+      const time = document.createElement("span");
+      time.textContent = formatChatTime(message.createdAt);
+
+      const text = document.createElement("div");
+      text.className = "proxy-chat-text";
+      text.textContent = message.message || "";
+
+      meta.append(authorWrap, time);
+      item.append(meta, text);
+      fragment.appendChild(item);
+    }
+
+    list.appendChild(fragment);
+    lastRenderedChatMessageId = Number(messages[messages.length - 1]?.id) || 0;
+    if (shouldStickToBottom || !list.dataset.loadedOnce) {
+      list.scrollTop = list.scrollHeight;
+    }
+    list.dataset.loadedOnce = "true";
+  }
+
+  async function fetchChatMessages() {
+    try {
+      const res = await fetch("/api/chat/messages", { cache: "no-store" });
+      if (!res.ok) {
+        return;
+      }
+      const data = await res.json();
+      const messages = Array.isArray(data.messages) ? data.messages : [];
+      const newestId = Number(messages[messages.length - 1]?.id) || 0;
+      if (newestId !== lastRenderedChatMessageId || newestId === 0) {
+        renderChatMessages(messages);
+      }
+    } catch {
+      // Ignore transient chat polling errors silently.
+    }
+  }
+
+  async function sendChatMessage() {
+    const name = getSavedChatName();
+    const input = document.getElementById("proxy-chat-message-input");
+    if (!name || !input) {
+      setChatStatus("Pick a name first.", true);
+      return;
+    }
+
+    const message = String(input.value || "").trim();
+    if (!message) {
+      setChatStatus("Type a message first.", true);
+      return;
+    }
+
+    setChatStatus("Sending...");
+
+    try {
+      const res = await fetch("/api/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitorId: getChatVisitorId(),
+          name,
+          message,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setChatStatus((data && data.error) || "Failed to send message.", true);
+        return;
+      }
+
+      input.value = "";
+      setChatStatus("Message sent.");
+      renderChatMessages(Array.isArray(data.messages) ? data.messages : []);
+    } catch {
+      setChatStatus("Network error. Try again.", true);
+    }
+  }
+
+  function saveChatName() {
+    const input = document.getElementById("proxy-chat-name-input");
+    if (!input) {
+      return;
+    }
+
+    const name = sanitizeLocalChatName(input.value);
+    if (!name || name.length < 2 || !/^[a-zA-Z0-9 ._-]+$/.test(name)) {
+      setChatStatus("Use 2-24 letters, numbers, spaces, dots, dashes, or underscores.", true);
+      return;
+    }
+
+    localStorage.setItem("proxyChatName", name);
+    updateChatComposerState();
+    setChatStatus(`Joined chat as ${name}.`);
+  }
+
+  function mountChatWidget() {
+    if (document.getElementById("proxy-chat-widget")) {
+      updateChatComposerState();
+      return;
+    }
+
+    const widget = document.createElement("section");
+    widget.id = "proxy-chat-widget";
+    widget.innerHTML = `
+      <div id="proxy-chat-header">
+        <div id="proxy-chat-title">Proxy Chat</div>
+        <div id="proxy-chat-name-badge"></div>
+      </div>
+      <div id="proxy-chat-body">
+        <div id="proxy-chat-name-row">
+          <input id="proxy-chat-name-input" type="text" maxlength="24" placeholder="Pick a name" autocomplete="off" />
+          <button id="proxy-chat-save-name" type="button">Use Name</button>
+        </div>
+        <div id="proxy-chat-messages"></div>
+        <div id="proxy-chat-compose">
+          <input id="proxy-chat-message-input" type="text" maxlength="280" placeholder="Pick a name first" autocomplete="off" />
+          <button id="proxy-chat-send" type="button">Send</button>
+        </div>
+        <div id="proxy-chat-status"></div>
+      </div>
+    `;
+
+    document.body.appendChild(widget);
+
+    document.getElementById("proxy-chat-save-name")?.addEventListener("click", saveChatName);
+    document.getElementById("proxy-chat-send")?.addEventListener("click", sendChatMessage);
+    document.getElementById("proxy-chat-name-input")?.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        saveChatName();
+      }
+    });
+    document.getElementById("proxy-chat-message-input")?.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        sendChatMessage();
+      }
+    });
+
+    updateChatComposerState();
+    fetchChatMessages();
+    if (chatPollIntervalId === null) {
+      chatPollIntervalId = window.setInterval(fetchChatMessages, 3000);
+    }
+  }
+
+  function normalizeProxyHijackUrl(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) {
+      return "";
+    }
+    if (/^http(s?):\/\//.test(trimmed)) {
+      return trimmed;
+    }
+    if (trimmed.includes(".")) {
+      return `https://${trimmed}`;
+    }
+    return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
+  }
+
+  function applyProxyUrlHijack(state) {
+    const version = Number(state.proxyUrlHijackVersion) || 0;
+    const rawUrl = state.proxyUrlHijack || "";
+    if (!version || !rawUrl) {
+      return;
+    }
+
+    const handledVersion = Number(sessionStorage.getItem("admin_proxy_url_hijack_version") || 0);
+    if (version <= handledVersion) {
+      return;
+    }
+
+    const normalizedUrl = normalizeProxyHijackUrl(rawUrl);
+    if (!normalizedUrl) {
+      return;
+    }
+
+    sessionStorage.setItem("admin_proxy_url_hijack_version", String(version));
+
+    if (window.location.pathname === "/d" && typeof window.adminOpenProxyUrl === "function") {
+      window.adminOpenProxyUrl(normalizedUrl);
+      return;
+    }
+
+    sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(normalizedUrl));
+    window.location.href = "/d";
+  }
+
+  function applyTabHijack(state) {
+    const iconElement = document.getElementById("tab-favicon");
+    const titleElement = document.getElementById("t");
+    if (!iconElement || !titleElement) {
+      return;
+    }
+
+    if (!titleElement.dataset.defaultTitle) {
+      titleElement.dataset.defaultTitle = titleElement.textContent || document.title || "Home";
+    }
+    if (!iconElement.dataset.defaultHref) {
+      iconElement.dataset.defaultHref = iconElement.getAttribute("href") || "favicon.png";
+    }
+
+    const nextTitle = state.tabTitleOverride || titleElement.dataset.defaultTitle;
+    const nextFavicon = state.tabFaviconOverride || iconElement.dataset.defaultHref;
+
+    titleElement.textContent = nextTitle;
+    document.title = nextTitle;
+    iconElement.setAttribute("href", nextFavicon);
+  }
+
+  function randomBinaryString(length = 40) {
+    return Array.from({ length }, () => (Math.random() > 0.5 ? "1" : "0")).join(" ");
+  }
+
+  function ensureEffectStyles() {
+    if (document.getElementById("admin-effects-style")) return;
+    const style = document.createElement("style");
+    style.id = "admin-effects-style";
+    style.textContent = `
+      body.takeover-matrix {
+        background: radial-gradient(circle at top, rgba(29, 255, 141, .08), transparent 45%), #050a06 !important;
+        color: #9affc9;
+      }
+      body.takeover-emergency {
+        background: linear-gradient(135deg, #2b0000, #6f0909) !important;
+        color: #ffe8e8;
+      }
+      body.takeover-arcade {
+        background: radial-gradient(circle at top left, rgba(0,255,247,.18), transparent 35%), radial-gradient(circle at bottom right, rgba(255,0,183,.18), transparent 40%), #12091f !important;
+        color: #f7ebff;
+      }
+      body.takeover-gold {
+        background: linear-gradient(145deg, #14110b, #2a2314) !important;
+        color: #fff0b3;
+      }
+      body.takeover-matrix .main,
+      body.takeover-matrix .f-nav,
+      body.takeover-matrix .nav,
+      body.takeover-matrix .nav-bar,
+      body.takeover-matrix button,
+      body.takeover-matrix input {
+        border-color: rgba(80, 255, 161, .32) !important;
+        background: rgba(5, 21, 10, .75) !important;
+        color: #9affc9 !important;
+        box-shadow: 0 0 18px rgba(63, 255, 153, .12);
+      }
+      body.takeover-emergency .main,
+      body.takeover-emergency .f-nav,
+      body.takeover-emergency .nav,
+      body.takeover-emergency .nav-bar,
+      body.takeover-emergency button,
+      body.takeover-emergency input {
+        border-color: rgba(255, 125, 125, .28) !important;
+        background: rgba(73, 8, 8, .76) !important;
+        color: #fff0f0 !important;
+        box-shadow: 0 0 22px rgba(255, 59, 59, .16);
+      }
+      body.takeover-arcade .main,
+      body.takeover-arcade .f-nav,
+      body.takeover-arcade .nav,
+      body.takeover-arcade .nav-bar,
+      body.takeover-arcade button,
+      body.takeover-arcade input {
+        border-color: rgba(255, 95, 214, .32) !important;
+        background: rgba(31, 10, 47, .76) !important;
+        color: #fff1ff !important;
+        box-shadow: 0 0 26px rgba(0, 241, 255, .14);
+      }
+      body.takeover-gold .main,
+      body.takeover-gold .f-nav,
+      body.takeover-gold .nav,
+      body.takeover-gold .nav-bar,
+      body.takeover-gold button,
+      body.takeover-gold input {
+        border-color: rgba(255, 211, 97, .34) !important;
+        background: rgba(42, 31, 11, .78) !important;
+        color: #fff0b3 !important;
+        box-shadow: 0 0 26px rgba(255, 208, 76, .12);
+      }
+      body.takeover-matrix::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background: repeating-linear-gradient(to bottom, rgba(95,255,143,.03), rgba(95,255,143,.03) 2px, transparent 2px, transparent 6px);
+        z-index: 2;
+      }
+      #admin-matrix-overlay {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .admin-matrix-column {
+        position: absolute;
+        top: -120%;
+        color: rgba(111, 255, 163, 0.7);
+        font: 700 18px/1 monospace;
+        text-shadow: 0 0 10px rgba(111, 255, 163, 0.4);
+        white-space: pre;
+        writing-mode: vertical-rl;
+        text-orientation: upright;
+        user-select: none;
+        animation-name: admin-matrix-fall;
+        animation-timing-function: linear;
+        animation-iteration-count: infinite;
+      }
+      @keyframes admin-matrix-fall {
+        0% { transform: translateY(-120%); opacity: 0; }
+        8% { opacity: 0.9; }
+        100% { transform: translateY(220vh); opacity: 0.15; }
+      }
+      #admin-broadcast-banner {
+        position: fixed;
+        top: 74px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 8000;
+        max-width: min(92vw, 980px);
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(255,255,255,.28);
+        background: rgba(11, 56, 52, .86);
+        color: #f3fffd;
+        text-align: center;
+        box-shadow: 0 10px 26px rgba(0,0,0,.28);
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+      }
+      #admin-global-popup {
+        position: fixed;
+        inset: 0;
+        z-index: 9500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(2, 11, 14, 0.55);
+        backdrop-filter: blur(8px);
+      }
+      #admin-global-popup-card {
+        width: min(560px, 92vw);
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,.24);
+        background: linear-gradient(135deg, rgba(10, 82, 76, .92), rgba(16, 108, 100, .86));
+        box-shadow: 0 26px 60px rgba(0,0,0,.34);
+        padding: 24px;
+        color: #f3fffd;
+        text-align: center;
+      }
+      #admin-global-popup-card h2 {
+        margin: 0 0 10px;
+        font-size: clamp(1.35rem, 2.5vw, 2rem);
+        letter-spacing: .04em;
+      }
+      #admin-global-popup-card p {
+        margin: 0;
+        font-size: 1rem;
+        line-height: 1.6;
+        color: rgba(243,255,253,.88);
+      }
+      #admin-global-popup-card button {
+        margin-top: 18px;
+        min-width: 140px;
+      }
+      #admin-maintenance-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 9700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: radial-gradient(circle at 20% 20%, rgba(17, 62, 56, .65), rgba(2, 8, 10, .92));
+        backdrop-filter: blur(8px);
+      }
+      #admin-maintenance-card {
+        width: min(620px, 94vw);
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,.22);
+        background: linear-gradient(145deg, rgba(9, 58, 53, .92), rgba(7, 38, 35, .92));
+        box-shadow: 0 24px 50px rgba(0,0,0,.42);
+        padding: 24px;
+        text-align: center;
+        color: #f3fffd;
+      }
+      #admin-maintenance-card h2 {
+        margin: 0 0 10px;
+        font-size: clamp(1.3rem, 2.3vw, 2rem);
+        letter-spacing: .05em;
+      }
+      #admin-maintenance-card p {
+        margin: 0;
+        line-height: 1.55;
+        color: rgba(243,255,253,.86);
+      }
+      #admin-jumpscare-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 9800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 12px;
+        pointer-events: none;
+        opacity: 0;
+        background: radial-gradient(circle at center, rgba(255, 0, 0, 0.84) 0%, rgba(15, 0, 0, 0.94) 42%, rgba(0, 0, 0, 1) 100%);
+      }
+      #admin-jumpscare-overlay.active {
+        animation: admin-jumpscare-pop 210ms ease-out both;
+      }
+      #admin-jumpscare-title {
+        color: #ffffff;
+        font-family: Impact, Haettenschweiler, "Arial Black", sans-serif;
+        font-size: clamp(2rem, 9vw, 5.8rem);
+        letter-spacing: .08em;
+        text-shadow: 0 0 20px rgba(255, 0, 0, .95), 0 0 40px rgba(0, 0, 0, .9);
+        transform: rotate(-2deg);
+      }
+      #admin-jumpscare-face {
+        width: min(56vw, 420px);
+        aspect-ratio: 1 / 1;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 58%, #0d0d0d 0%, #070707 48%, #000 100%);
+        box-shadow: 0 0 80px rgba(255, 40, 40, .82), inset 0 -20px 40px rgba(255, 0, 0, .25);
+        position: relative;
+      }
+      .admin-jumpscare-eye {
+        position: absolute;
+        top: 33%;
+        width: 16%;
+        height: 16%;
+        border-radius: 50%;
+        background: #ff2d2d;
+        box-shadow: 0 0 35px rgba(255, 32, 32, .95);
+      }
+      .admin-jumpscare-eye.left {
+        left: 27%;
+      }
+      .admin-jumpscare-eye.right {
+        right: 27%;
+      }
+      #admin-jumpscare-mouth {
+        position: absolute;
+        left: 50%;
+        bottom: 19%;
+        transform: translateX(-50%);
+        width: 40%;
+        height: 21%;
+        border-radius: 0 0 50% 50%;
+        background: linear-gradient(to bottom, #090909, #330000 70%, #770000);
+        box-shadow: inset 0 12px 18px rgba(255, 15, 15, .25);
+      }
+      body.admin-jumpscare-shake {
+        animation: admin-jumpscare-shake 360ms ease-in-out 2;
+      }
+      @keyframes admin-jumpscare-pop {
+        0% { transform: scale(.84); filter: blur(8px); opacity: 0; }
+        14% { transform: scale(1.07); filter: blur(1px); opacity: 1; }
+        26% { transform: scale(.99); }
+        100% { transform: scale(1); filter: blur(0); opacity: 1; }
+      }
+      @keyframes admin-jumpscare-shake {
+        0%, 100% { transform: translate(0, 0); }
+        20% { transform: translate(-10px, 6px); }
+        40% { transform: translate(12px, -8px); }
+        60% { transform: translate(-8px, -5px); }
+        80% { transform: translate(8px, 7px); }
+      }
+      #proxy-chat-widget {
+        position: fixed;
+        left: 16px;
+        bottom: 16px;
+        z-index: 9400;
+        width: min(420px, calc(100vw - 32px));
+        max-width: calc(100vw - 32px);
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,.24);
+        background: linear-gradient(145deg, rgba(6, 36, 34, .9), rgba(10, 68, 63, .82));
+        box-shadow: 0 16px 36px rgba(0,0,0,.28);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+      }
+      #proxy-chat-widget,
+      #proxy-chat-widget * {
+        box-sizing: border-box;
+      }
+      #proxy-chat-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,.06);
+        border-bottom: 1px solid rgba(255,255,255,.12);
+      }
+      #proxy-chat-title {
+        font: 700 14px/1.2 inherit;
+        letter-spacing: .04em;
+        color: #f3fffd;
+      }
+      #proxy-chat-name-badge {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 58%;
+        font-size: 12px;
+        color: rgba(243,255,253,.7);
+        text-align: right;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #proxy-chat-body {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+      }
+      #proxy-chat-name-row,
+      #proxy-chat-compose {
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+        width: 100%;
+      }
+      #proxy-chat-widget input,
+      #proxy-chat-widget button {
+        font-family: inherit;
+      }
+      #proxy-chat-widget input {
+        flex: 1 1 0;
+        min-width: 0;
+        width: auto !important;
+        max-width: 100%;
+        border-radius: 10px;
+        border: 1px solid rgba(255,255,255,.18);
+        padding: 9px 11px;
+        background: rgba(255,255,255,.08);
+        color: #f3fffd;
+        outline: none;
+      }
+      #proxy-chat-widget input::placeholder {
+        color: rgba(243,255,253,.48);
+      }
+      #proxy-chat-widget button {
+        flex: 0 0 auto;
+        width: auto;
+        max-width: 100%;
+        border-radius: 10px;
+        border: 1px solid rgba(255,255,255,.2);
+        padding: 9px 12px;
+        background: rgba(255,255,255,.12);
+        color: #f3fffd;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      #proxy-chat-widget button:hover {
+        background: rgba(255,255,255,.2);
+      }
+      #proxy-chat-widget button:disabled,
+      #proxy-chat-widget input:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+      }
+      #proxy-chat-messages {
+        height: 240px;
+        overflow-y: auto;
+        display: grid;
+        gap: 8px;
+        padding-right: 4px;
+      }
+      .proxy-chat-empty {
+        padding: 20px 10px;
+        text-align: center;
+        font-size: 13px;
+        color: rgba(243,255,253,.62);
+      }
+      .proxy-chat-message {
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: rgba(255,255,255,.08);
+        border: 1px solid rgba(255,255,255,.08);
+      }
+      .proxy-chat-message.system {
+        background: linear-gradient(145deg, rgba(70, 164, 214, .18), rgba(54, 120, 198, .12));
+        border-color: rgba(139, 216, 255, .45);
+        box-shadow: inset 0 0 0 1px rgba(139, 216, 255, .2);
+      }
+      .proxy-chat-message.own {
+        background: rgba(77, 233, 193, .14);
+        border-color: rgba(77, 233, 193, .2);
+      }
+      .proxy-chat-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 4px;
+        font-size: 11px;
+        color: rgba(243,255,253,.62);
+      }
+      .proxy-chat-author-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .proxy-chat-author {
+        color: #f3fffd;
+        font-weight: 700;
+      }
+      .proxy-chat-tag {
+        padding: 1px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.16);
+        background: rgba(255,255,255,.08);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .06em;
+      }
+      .proxy-chat-text {
+        color: rgba(243,255,253,.88);
+        font-size: 13px;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+      #proxy-chat-status {
+        min-height: 15px;
+        font-size: 12px;
+        color: rgba(243,255,253,.66);
+      }
+      #proxy-chat-status.error {
+        color: #ffd4d4;
+      }
+      @media (max-width: 640px) {
+        #proxy-chat-widget {
+          left: 12px;
+          right: 12px;
+          bottom: 108px;
+          width: auto;
+        }
+        #proxy-chat-name-row,
+        #proxy-chat-compose {
+          flex-wrap: wrap;
+        }
+        #proxy-chat-name-badge {
+          max-width: 50%;
+        }
+        #proxy-chat-widget button,
+        #proxy-chat-widget input {
+          width: 100% !important;
+        }
+      }
+      #admin-weather-overlay {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+        z-index: 3;
+      }
+      #admin-weather-overlay.weather-rain,
+      #admin-weather-overlay.weather-hail,
+      #admin-weather-overlay.weather-lightning {
+        background: linear-gradient(to bottom, rgba(7, 15, 24, .12), transparent 30%, rgba(4, 10, 18, .08));
+      }
+      #admin-weather-overlay.weather-fog {
+        background: radial-gradient(circle at 20% 40%, rgba(235, 243, 255, .16), transparent 35%), radial-gradient(circle at 80% 60%, rgba(235, 243, 255, .14), transparent 42%);
+      }
+      #admin-weather-overlay.weather-lightning {
+        background: radial-gradient(circle at 20% 10%, rgba(255, 255, 255, .08), transparent 28%), linear-gradient(to bottom, rgba(3, 7, 13, .42), rgba(6, 12, 20, .18) 38%, rgba(3, 8, 12, .28));
+      }
+      .admin-weather-cloud {
+        position: absolute;
+        top: 0;
+        width: 38vw;
+        min-width: 220px;
+        height: 110px;
+        background: radial-gradient(circle at 20% 50%, rgba(246, 250, 255, .16), transparent 26%), radial-gradient(circle at 46% 38%, rgba(246, 250, 255, .2), transparent 30%), radial-gradient(circle at 68% 52%, rgba(246, 250, 255, .15), transparent 27%);
+        filter: blur(8px);
+        opacity: .75;
+      }
+      .admin-weather-rain-drop,
+      .admin-weather-hail-drop,
+      .admin-weather-snowflake {
+        position: absolute;
+        top: -12vh;
+        pointer-events: none;
+        animation-timing-function: linear;
+        animation-iteration-count: infinite;
+      }
+      .admin-weather-rain-drop {
+        width: 2px;
+        height: 18px;
+        background: linear-gradient(to bottom, rgba(205, 233, 255, 0), rgba(205, 233, 255, .82));
+        transform: rotate(12deg);
+        animation-name: admin-rain-fall;
+      }
+      .admin-weather-hail-drop {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: rgba(240, 247, 255, .92);
+        box-shadow: 0 0 8px rgba(255,255,255,.24);
+        animation-name: admin-hail-fall;
+      }
+      .admin-weather-snowflake {
+        color: rgba(255,255,255,.92);
+        font-size: 14px;
+        text-shadow: 0 0 8px rgba(255,255,255,.22);
+        animation-name: admin-snow-fall;
+      }
+      .admin-weather-fog-layer {
+        position: absolute;
+        left: -10%;
+        width: 120%;
+        height: 28%;
+        background: radial-gradient(circle at 20% 50%, rgba(236, 244, 255, .16), transparent 24%), radial-gradient(circle at 50% 60%, rgba(236, 244, 255, .12), transparent 28%), radial-gradient(circle at 80% 40%, rgba(236, 244, 255, .14), transparent 24%);
+        filter: blur(18px);
+        animation: admin-fog-drift 18s ease-in-out infinite alternate;
+      }
+      .admin-weather-flash {
+        position: absolute;
+        inset: 0;
+        background: rgba(214, 233, 255, .0);
+      }
+      .admin-weather-flash.active {
+        animation: admin-lightning-flash .55s ease-out;
+      }
+      .admin-weather-bolt {
+        position: absolute;
+        top: 8%;
+        width: 16px;
+        height: 42vh;
+        opacity: 0;
+        filter: drop-shadow(0 0 14px rgba(255,255,255,.9));
+        clip-path: polygon(40% 0, 78% 0, 54% 28%, 88% 28%, 22% 100%, 42% 54%, 12% 54%);
+        background: linear-gradient(to bottom, rgba(255,255,255,.98), rgba(201, 232, 255, .74));
+      }
+      .admin-weather-flash.active .admin-weather-bolt,
+      .admin-weather-bolt.active {
+        animation: admin-lightning-bolt .48s ease-out;
+      }
+      @keyframes admin-rain-fall {
+        from { transform: translate3d(0, -10vh, 0) rotate(12deg); opacity: .2; }
+        to { transform: translate3d(-90px, 120vh, 0) rotate(12deg); opacity: .95; }
+      }
+      @keyframes admin-hail-fall {
+        from { transform: translate3d(0, -8vh, 0); opacity: .5; }
+        to { transform: translate3d(-50px, 120vh, 0); opacity: 1; }
+      }
+      @keyframes admin-snow-fall {
+        from { transform: translate3d(0, -10vh, 0); opacity: .2; }
+        to { transform: translate3d(60px, 120vh, 0); opacity: 1; }
+      }
+      @keyframes admin-fog-drift {
+        from { transform: translateX(-3%) translateY(0); opacity: .55; }
+        to { transform: translateX(3%) translateY(2%); opacity: .85; }
+      }
+      @keyframes admin-lightning-flash {
+        0% { background: rgba(214, 233, 255, 0); }
+        12% { background: rgba(214, 233, 255, .42); }
+        20% { background: rgba(255,255,255,.08); }
+        26% { background: rgba(214, 233, 255, .56); }
+        100% { background: rgba(214, 233, 255, 0); }
+      }
+      @keyframes admin-lightning-bolt {
+        0% { opacity: 0; transform: scaleY(.72) skewX(-10deg); }
+        16% { opacity: .96; transform: scaleY(1.02) skewX(-10deg); }
+        40% { opacity: .38; transform: scaleY(.96) skewX(-10deg); }
+        100% { opacity: 0; transform: scaleY(.7) skewX(-10deg); }
+      }
+      body.party-mode::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 1;
+        background: rgba(255, 0, 80, 0.2);
+        animation: admin-party-flash 1.25s steps(1, end) infinite;
+      }
+      @keyframes admin-party-flash {
+        0% { background: rgba(255, 0, 80, 0.22); }
+        20% { background: rgba(0, 255, 110, 0.22); }
+        40% { background: rgba(0, 140, 255, 0.22); }
+        60% { background: rgba(255, 40, 200, 0.22); }
+        80% { background: rgba(255, 210, 0, 0.22); }
+        100% { background: rgba(255, 0, 80, 0.22); }
+      }
+      body.chaos-mode {
+        animation: admin-chaos-shake .35s steps(2, end) infinite;
+      }
+      body.chaos-mode .main,
+      body.chaos-mode .f-nav,
+      body.chaos-mode .nav,
+      body.chaos-mode .nav-bar {
+        animation: admin-chaos-pop .65s ease-in-out infinite alternate;
+      }
+      body.chaos-mode .title,
+      body.chaos-mode .navbar-link,
+      body.chaos-mode button,
+      body.chaos-mode input {
+        filter: hue-rotate(120deg) saturate(1.4);
+      }
+      .admin-confetti-piece {
+        position: fixed;
+        top: -20px;
+        width: 10px;
+        height: 18px;
+        border-radius: 2px;
+        pointer-events: none;
+        z-index: 9000;
+        opacity: .92;
+        will-change: transform, opacity;
+      }
+      @keyframes admin-chaos-shake {
+        0% { transform: translate(0, 0) rotate(0deg); }
+        25% { transform: translate(1px, -1px) rotate(-.6deg); }
+        50% { transform: translate(-2px, 1px) rotate(.8deg); }
+        75% { transform: translate(2px, 2px) rotate(-.5deg); }
+        100% { transform: translate(-1px, -2px) rotate(.4deg); }
+      }
+      @keyframes admin-chaos-pop {
+        0% { transform: scale(1) rotate(-1deg); }
+        100% { transform: scale(1.02) rotate(1deg); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function blastConfetti(pieceCount = 90) {
+    const colors = ["#ff295f", "#24ff72", "#1da1ff", "#ff4fd8", "#ffd429", "#ffffff"];
+    for (let index = 0; index < pieceCount; index += 1) {
+      const piece = document.createElement("div");
+      piece.className = "admin-confetti-piece";
+      piece.style.left = `${Math.random() * 100}vw`;
+      piece.style.background = colors[index % colors.length];
+      piece.style.transform = `translate3d(0, 0, 0) rotate(${Math.random() * 360}deg)`;
+      document.body.appendChild(piece);
+
+      const drift = (Math.random() - 0.5) * 220;
+      const fall = window.innerHeight + 120 + Math.random() * 180;
+      const spin = 360 + Math.random() * 720;
+      const duration = 1200 + Math.random() * 1200;
+
+      piece.animate(
+        [
+          { transform: `translate3d(0, -20px, 0) rotate(0deg)`, opacity: 1 },
+          { transform: `translate3d(${drift}px, ${fall}px, 0) rotate(${spin}deg)`, opacity: 0.1 },
+        ],
+        { duration, easing: "cubic-bezier(.18,.74,.34,.98)", fill: "forwards" },
+      );
+
+      setTimeout(() => piece.remove(), duration + 60);
+    }
+  }
+
+  function startConfettiLoop() {
+    if (confettiIntervalId !== null) {
+      return;
+    }
+
+    blastConfetti(36);
+    confettiIntervalId = window.setInterval(() => {
+      blastConfetti(24);
+    }, 350);
+  }
+
+  function stopConfettiLoop() {
+    if (confettiIntervalId === null) {
+      return;
+    }
+    window.clearInterval(confettiIntervalId);
+    confettiIntervalId = null;
+  }
+
+  function disableWeatherOverlay() {
+    document.getElementById("admin-weather-overlay")?.remove();
+    if (weatherFlashIntervalId !== null) {
+      window.clearInterval(weatherFlashIntervalId);
+      weatherFlashIntervalId = null;
+    }
+    weatherCurrentEffect = "";
+  }
+
+  function startWeatherFlashLoop(overlay) {
+    if (weatherFlashIntervalId !== null) {
+      window.clearInterval(weatherFlashIntervalId);
+    }
+    const isLightningStorm = overlay.classList.contains("weather-lightning");
+    const interval = isLightningStorm ? 1200 : 1800;
+    weatherFlashIntervalId = window.setInterval(() => {
+      const flash = overlay.querySelector(".admin-weather-flash");
+      if (!flash) {
+        return;
+      }
+      const shouldFlash = isLightningStorm ? Math.random() < 0.82 : Math.random() < 0.55;
+      if (!shouldFlash) {
+        return;
+      }
+      flash.classList.remove("active");
+      for (const bolt of flash.querySelectorAll(".admin-weather-bolt")) {
+        bolt.classList.remove("active");
+        bolt.style.left = `${randomBetween(12, 82)}%`;
+        bolt.style.height = `${randomBetween(24, 54)}vh`;
+      }
+      void flash.offsetWidth;
+      flash.classList.add("active");
+      for (const bolt of flash.querySelectorAll(".admin-weather-bolt")) {
+        bolt.classList.add("active");
+      }
+    }, interval + Math.random() * interval);
+  }
+
+  function addStormClouds(overlay, count = 3) {
+    for (let index = 0; index < count; index += 1) {
+      const cloud = document.createElement("div");
+      cloud.className = "admin-weather-cloud";
+      cloud.style.left = `${index * 24 - 8}%`;
+      cloud.style.top = `${2 + (index % 2) * 3}%`;
+      cloud.style.opacity = `${0.72 + index * 0.05}`;
+      cloud.style.transform = `scale(${1 + index * 0.08})`;
+      overlay.appendChild(cloud);
+    }
+  }
+
+  function addLightningFlashLayer(overlay, boltCount = 2) {
+    const flash = document.createElement("div");
+    flash.className = "admin-weather-flash";
+    for (let index = 0; index < boltCount; index += 1) {
+      const bolt = document.createElement("div");
+      bolt.className = "admin-weather-bolt";
+      bolt.style.left = `${randomBetween(12, 82)}%`;
+      bolt.style.height = `${randomBetween(24, 54)}vh`;
+      flash.appendChild(bolt);
+    }
+    overlay.appendChild(flash);
+    startWeatherFlashLoop(overlay);
+  }
+
+  function enableWeatherOverlay(effect) {
+    if (weatherCurrentEffect === effect && document.getElementById("admin-weather-overlay")) {
+      return;
+    }
+
+    disableWeatherOverlay();
+
+    if (!effect) {
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = "admin-weather-overlay";
+    overlay.className = `weather-${effect}`;
+
+    if (effect === "rain" || effect === "hail" || effect === "lightning") {
+      addStormClouds(overlay, effect === "lightning" ? 4 : 3);
+    }
+
+    if (effect === "rain") {
+      for (let index = 0; index < 90; index += 1) {
+        const drop = document.createElement("div");
+        drop.className = "admin-weather-rain-drop";
+        drop.style.left = `${Math.random() * 100}%`;
+        drop.style.animationDuration = `${0.8 + Math.random() * 0.7}s`;
+        drop.style.animationDelay = `${Math.random() * -1.5}s`;
+        overlay.appendChild(drop);
+      }
+      addLightningFlashLayer(overlay, 1);
+    }
+
+    if (effect === "hail") {
+      for (let index = 0; index < 80; index += 1) {
+        const hail = document.createElement("div");
+        hail.className = "admin-weather-hail-drop";
+        hail.style.left = `${Math.random() * 100}%`;
+        hail.style.animationDuration = `${0.7 + Math.random() * 0.5}s`;
+        hail.style.animationDelay = `${Math.random() * -1.2}s`;
+        overlay.appendChild(hail);
+      }
+      addLightningFlashLayer(overlay, 2);
+    }
+
+    if (effect === "lightning") {
+      for (let index = 0; index < 40; index += 1) {
+        const drop = document.createElement("div");
+        drop.className = "admin-weather-rain-drop";
+        drop.style.left = `${Math.random() * 100}%`;
+        drop.style.height = `${12 + Math.random() * 12}px`;
+        drop.style.opacity = `${0.3 + Math.random() * 0.45}`;
+        drop.style.animationDuration = `${0.65 + Math.random() * 0.45}s`;
+        drop.style.animationDelay = `${Math.random() * -1.4}s`;
+        overlay.appendChild(drop);
+      }
+      addLightningFlashLayer(overlay, 3);
+    }
+
+    if (effect === "snow") {
+      for (let index = 0; index < 65; index += 1) {
+        const flake = document.createElement("div");
+        flake.className = "admin-weather-snowflake";
+        flake.textContent = Math.random() > 0.5 ? "*" : "❄";
+        flake.style.left = `${Math.random() * 100}%`;
+        flake.style.fontSize = `${10 + Math.random() * 12}px`;
+        flake.style.animationDuration = `${5 + Math.random() * 6}s`;
+        flake.style.animationDelay = `${Math.random() * -8}s`;
+        overlay.appendChild(flake);
+      }
+    }
+
+    if (effect === "fog") {
+      for (let index = 0; index < 4; index += 1) {
+        const layer = document.createElement("div");
+        layer.className = "admin-weather-fog-layer";
+        layer.style.top = `${8 + index * 20}%`;
+        layer.style.animationDuration = `${14 + index * 3}s`;
+        layer.style.animationDelay = `${index * -2}s`;
+        overlay.appendChild(layer);
+      }
+    }
+
+    document.body.appendChild(overlay);
+    weatherCurrentEffect = effect;
+  }
+
+  function disableMatrixOverlay() {
+    document.getElementById("admin-matrix-overlay")?.remove();
+  }
+
+  function hideGlobalPopup() {
+    document.getElementById("admin-global-popup")?.remove();
+  }
+
+  function hideMaintenanceOverlay() {
+    document.getElementById("admin-maintenance-overlay")?.remove();
+  }
+
+  function showMaintenanceOverlay(message) {
+    hideMaintenanceOverlay();
+    const overlay = document.createElement("div");
+    overlay.id = "admin-maintenance-overlay";
+    overlay.innerHTML = `
+      <div id="admin-maintenance-card">
+        <h2>Maintenance Mode</h2>
+        <p>${message || "Maintenance in progress. Please check back soon."}</p>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  function ensureJumpscareOverlay() {
+    let overlay = document.getElementById("admin-jumpscare-overlay");
+    if (overlay) {
+      return overlay;
+    }
+
+    overlay = document.createElement("div");
+    overlay.id = "admin-jumpscare-overlay";
+    overlay.innerHTML = `
+      <div id="admin-jumpscare-title">DON'T LOOK BEHIND YOU</div>
+      <div id="admin-jumpscare-face" aria-hidden="true">
+        <div class="admin-jumpscare-eye left"></div>
+        <div class="admin-jumpscare-eye right"></div>
+        <div id="admin-jumpscare-mouth"></div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  function playJumpscareScream() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      return;
+    }
+
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const bufferSize = Math.floor(ctx.sampleRate * 1.35);
+    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+
+    for (let index = 0; index < bufferSize; index += 1) {
+      data[index] = (Math.random() * 2 - 1) * (1 - index / bufferSize);
+    }
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = "bandpass";
+    noiseFilter.frequency.setValueAtTime(1700, now);
+    noiseFilter.Q.setValueAtTime(0.8, now);
+
+    const oscA = ctx.createOscillator();
+    oscA.type = "sawtooth";
+    oscA.frequency.setValueAtTime(620, now);
+    oscA.frequency.exponentialRampToValueAtTime(320, now + 0.45);
+
+    const oscB = ctx.createOscillator();
+    oscB.type = "triangle";
+    oscB.frequency.setValueAtTime(980, now);
+    oscB.frequency.exponentialRampToValueAtTime(540, now + 0.7);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.55, now + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.3, now + 0.3);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.25);
+
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -18;
+    compressor.knee.value = 8;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0.002;
+    compressor.release.value = 0.22;
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(gain);
+    oscA.connect(gain);
+    oscB.connect(gain);
+    gain.connect(compressor);
+    compressor.connect(ctx.destination);
+
+    noise.start(now);
+    oscA.start(now);
+    oscB.start(now);
+
+    noise.stop(now + 1.3);
+    oscA.stop(now + 1.3);
+    oscB.stop(now + 1.3);
+
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 1500);
+  }
+
+  function triggerAdminJumpscare() {
+    const overlay = ensureJumpscareOverlay();
+    overlay.classList.remove("active");
+    overlay.style.display = "flex";
+    void overlay.offsetWidth;
+    overlay.classList.add("active");
+    document.body.classList.add("admin-jumpscare-shake");
+
+    playJumpscareScream();
+
+    setTimeout(() => {
+      overlay.style.display = "none";
+      overlay.classList.remove("active");
+      document.body.classList.remove("admin-jumpscare-shake");
+    }, 1100);
+  }
+
+  function showGlobalPopup(state) {
+    const popupVersion = Number(state.popupVersion) || 0;
+    if (!state.popupTitle && !state.popupMessage) {
+      hideGlobalPopup();
+      return;
+    }
+    if (dismissedPopupVersion === popupVersion) {
+      return;
+    }
+
+    hideGlobalPopup();
+
+    const overlay = document.createElement("div");
+    overlay.id = "admin-global-popup";
+    overlay.innerHTML = `
+      <div id="admin-global-popup-card">
+        <h2>${state.popupTitle || "Message"}</h2>
+        <p>${state.popupMessage || ""}</p>
+        <button type="button">${state.popupButtonText || "Close"}</button>
+      </div>
+    `;
+
+    const button = overlay.querySelector("button");
+    button.addEventListener("click", () => {
+      dismissedPopupVersion = popupVersion;
+      hideGlobalPopup();
+    });
+
+    document.body.appendChild(overlay);
+  }
+
+  function enableMatrixOverlay() {
+    let overlay = document.getElementById("admin-matrix-overlay");
+    if (overlay) {
+      return;
+    }
+
+    overlay = document.createElement("div");
+    overlay.id = "admin-matrix-overlay";
+
+    const columnCount = Math.max(14, Math.floor(window.innerWidth / 28));
+    for (let index = 0; index < columnCount; index += 1) {
+      const column = document.createElement("div");
+      column.className = "admin-matrix-column";
+      column.textContent = randomBinaryString(34 + Math.floor(Math.random() * 16));
+      column.style.left = `${(index / columnCount) * 100}%`;
+      column.style.animationDuration = `${6 + Math.random() * 5}s`;
+      column.style.animationDelay = `${Math.random() * -8}s`;
+      column.style.opacity = `${0.45 + Math.random() * 0.4}`;
+      overlay.appendChild(column);
+    }
+
+    document.body.appendChild(overlay);
+  }
+
+  function applyPublicEffects(state) {
+    ensureEffectStyles();
+
+    document.body.classList.remove("takeover-matrix", "takeover-emergency", "takeover-arcade", "takeover-gold");
+    if (state.takeoverTheme) {
+      document.body.classList.add(`takeover-${state.takeoverTheme}`);
+    }
+
+    if (state.takeoverTheme === "matrix") {
+      enableMatrixOverlay();
+    } else {
+      disableMatrixOverlay();
+    }
+
+    if (state.weatherEffect) {
+      enableWeatherOverlay(state.weatherEffect);
+    } else {
+      disableWeatherOverlay();
+    }
+
+    applyProxyUrlHijack(state);
+    applyTabHijack(state);
+    showGlobalPopup(state);
+    if (state.maintenanceMode) {
+      showMaintenanceOverlay(state.maintenanceMessage);
+    } else {
+      hideMaintenanceOverlay();
+    }
+
+    let banner = document.getElementById("admin-broadcast-banner");
+    if (state.bannerText) {
+      if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "admin-broadcast-banner";
+        document.body.appendChild(banner);
+      }
+      banner.textContent = state.bannerText;
+    } else if (banner) {
+      banner.remove();
+    }
+
+    document.body.classList.toggle("party-mode", Boolean(state.partyMode));
+    document.body.classList.toggle("chaos-mode", Boolean(state.chaosMode));
+
+    if (state.partyMode) {
+      startConfettiLoop();
+    } else {
+      stopConfettiLoop();
+    }
+
+    if (!hasLoadedEffects) {
+      lastConfettiVersion = Number(state.confettiVersion) || 0;
+      lastJumpscareVersion = Number(state.jumpscareVersion) || 0;
+      lastClientRefreshVersion = Number(state.clientRefreshVersion) || 0;
+      hasLoadedEffects = true;
+      return;
+    }
+
+    const currentConfettiVersion = Number(state.confettiVersion) || 0;
+    if (currentConfettiVersion > lastConfettiVersion) {
+      blastConfetti();
+      lastConfettiVersion = currentConfettiVersion;
+    }
+
+    const currentJumpscareVersion = Number(state.jumpscareVersion) || 0;
+    if (currentJumpscareVersion > lastJumpscareVersion) {
+      triggerAdminJumpscare();
+      lastJumpscareVersion = currentJumpscareVersion;
+    }
+
+    const currentClientRefreshVersion = Number(state.clientRefreshVersion) || 0;
+    if (currentClientRefreshVersion > lastClientRefreshVersion) {
+      const seenRefreshVersion = Number(sessionStorage.getItem("adminClientRefreshVersion") || "0");
+      lastClientRefreshVersion = currentClientRefreshVersion;
+      if (currentClientRefreshVersion > seenRefreshVersion) {
+        sessionStorage.setItem("adminClientRefreshVersion", String(currentClientRefreshVersion));
+        window.location.reload();
+      }
+    }
+  }
+
+  async function fetchPublicEffects() {
+    try {
+      const res = await fetch("/api/admin/public-state", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      applyPublicEffects(data);
+    } catch {
+      // Ignore effect polling errors silently.
+    }
+  }
+
+  let effectsIntervalId = null;
+
   // Blocked Hostnames Check
   const blockedHostnames = ["gointerstellar.app"];
 
@@ -38,6 +1476,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <a class="navbar-link" href="/./a"><i class="fa-solid fa-gamepad navbar-icon"></i><an>&#71;&#97;</an><an>&#109;&#101;&#115;</an></a>
         <a class="navbar-link" href="/./b"><i class="fa-solid fa-phone navbar-icon"></i><an>&#65;&#112;</an><an>&#112;&#115;</an></a>
         ${qp ? "" : '<a class="navbar-link" href="/./d"><i class="fa-solid fa-laptop navbar-icon"></i><an>&#84;&#97;</an><an>&#98;&#115;</an></a>'}
+        <a class="navbar-link" href="/admin"><i class="fa-solid fa-shield-halved navbar-icon"></i><an>&#65;&#100;</an><an>&#109;&#105;&#110;</an></a>
         <a class="navbar-link" href="/./c"><i class="fa-solid fa-gear navbar-icon settings-icon"></i><an>&#83;&#101;&#116;</an><an>&#116;&#105;&#110;&#103;</an></a>
       </div>`;
     nav.innerHTML = html;
@@ -295,6 +1734,10 @@ document.addEventListener("DOMContentLoaded", () => {
     setCloak(options[selectedValue].name, options[selectedValue].icon);
   }
 
+  mountChatWidget();
+  fetchPublicEffects();
+  effectsIntervalId = setInterval(fetchPublicEffects, 3000);
+
   // Event Key Logic
   const eventKey = JSON.parse(localStorage.getItem("eventKey")) || ["Ctrl", "E"];
   const pLink = localStorage.getItem("pLink") || "https://classroom.google.com/";
@@ -315,5 +1758,107 @@ document.addEventListener("DOMContentLoaded", () => {
   const savedBackgroundImage = localStorage.getItem("backgroundImage");
   if (savedBackgroundImage) {
     document.body.style.backgroundImage = `url('${savedBackgroundImage}')`;
+  }
+
+  // Random timed jumpscare – fires once per session on any page.
+  if (sessionStorage.getItem("jumpscarePlayed") !== "1") {
+    const jsOverlay = document.createElement("div");
+    jsOverlay.id = "jumpscare-overlay";
+    jsOverlay.style.cssText = "position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;flex-direction:column;gap:1rem;pointer-events:none;background:radial-gradient(circle at center,rgba(255,0,0,.85) 0%,rgba(15,0,0,.95) 40%,rgba(0,0,0,1) 100%);backdrop-filter:blur(2px)";
+
+    const jsTitle = document.createElement("div");
+    jsTitle.textContent = "DON'T LOOK BEHIND YOU";
+    jsTitle.style.cssText = "color:#fff;font-family:Impact,Haettenschweiler,'Arial Black',sans-serif;font-size:clamp(2rem,9vw,6rem);letter-spacing:.08em;text-shadow:0 0 20px rgba(255,0,0,.9),0 0 40px rgba(0,0,0,.9);transform:rotate(-2deg)";
+
+    const jsFace = document.createElement("div");
+    jsFace.setAttribute("aria-hidden", "true");
+    jsFace.style.cssText = "width:min(58vw,460px);aspect-ratio:1/1;border-radius:50%;background:radial-gradient(circle at 50% 58%,#111 0%,#090909 48%,#000 100%);box-shadow:0 0 80px rgba(255,40,40,.8),inset 0 -20px 40px rgba(255,0,0,.25);position:relative";
+
+    const jsEyeL = document.createElement("div");
+    const jsEyeR = document.createElement("div");
+    const jsMouth = document.createElement("div");
+    for (const eye of [jsEyeL, jsEyeR]) {
+      eye.style.cssText = "position:absolute;top:33%;width:16%;height:16%;border-radius:50%;background:#ff2d2d;box-shadow:0 0 35px rgba(255,32,32,.95)";
+    }
+    jsEyeL.style.left = "27%";
+    jsEyeR.style.right = "27%";
+    jsMouth.style.cssText = "position:absolute;left:50%;bottom:19%;transform:translateX(-50%);width:40%;height:21%;border-radius:0 0 50% 50%;background:linear-gradient(to bottom,#090909,#330000 70%,#770000);box-shadow:inset 0 12px 18px rgba(255,15,15,.25)";
+
+    jsFace.append(jsEyeL, jsEyeR, jsMouth);
+    jsOverlay.append(jsTitle, jsFace);
+    document.body.appendChild(jsOverlay);
+
+    const jsFxStyle = document.createElement("style");
+    jsFxStyle.textContent = `
+      @keyframes jumpscare-pop{0%{transform:scale(.84);filter:blur(8px);opacity:0}12%{transform:scale(1.06);filter:blur(1px);opacity:1}24%{transform:scale(.98)}100%{transform:scale(1);filter:blur(0);opacity:1}}
+      @keyframes jumpscare-shake{0%,100%{transform:translate(0,0)}20%{transform:translate(-10px,6px)}40%{transform:translate(12px,-8px)}60%{transform:translate(-8px,-5px)}80%{transform:translate(8px,7px)}}
+    `;
+    document.head.appendChild(jsFxStyle);
+
+    function jsPlayScream() {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const bufferSize = Math.floor(ctx.sampleRate * 1.35);
+      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuffer;
+      const noiseFilter = ctx.createBiquadFilter();
+      noiseFilter.type = "bandpass";
+      noiseFilter.frequency.setValueAtTime(1700, now);
+      noiseFilter.Q.setValueAtTime(0.8, now);
+      const oscA = ctx.createOscillator();
+      oscA.type = "sawtooth";
+      oscA.frequency.setValueAtTime(620, now);
+      oscA.frequency.exponentialRampToValueAtTime(320, now + 0.45);
+      const oscB = ctx.createOscillator();
+      oscB.type = "triangle";
+      oscB.frequency.setValueAtTime(980, now);
+      oscB.frequency.exponentialRampToValueAtTime(540, now + 0.7);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.55, now + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.3, now + 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.25);
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 8;
+      compressor.ratio.value = 12;
+      compressor.attack.value = 0.002;
+      compressor.release.value = 0.22;
+      noise.connect(noiseFilter);
+      noiseFilter.connect(gain);
+      oscA.connect(gain);
+      oscB.connect(gain);
+      gain.connect(compressor);
+      compressor.connect(ctx.destination);
+      noise.start(now); oscA.start(now); oscB.start(now);
+      noise.stop(now + 1.3); oscA.stop(now + 1.3); oscB.stop(now + 1.3);
+      setTimeout(() => ctx.close().catch(() => {}), 1500);
+    }
+
+    function jsFireJumpscare() {
+      if (sessionStorage.getItem("jumpscarePlayed") === "1") return;
+      sessionStorage.setItem("jumpscarePlayed", "1");
+      jsOverlay.style.display = "flex";
+      jsOverlay.style.animation = "jumpscare-pop 170ms ease-out both";
+      document.body.style.animation = "jumpscare-shake 360ms ease-in-out 2";
+      jsPlayScream();
+      setTimeout(() => {
+        jsOverlay.style.display = "none";
+        document.body.style.animation = "";
+      }, 1100);
+    }
+
+    function jsArmOnce() {
+      const delay = Math.floor(Math.random() * 7000) + 6000;
+      setTimeout(jsFireJumpscare, delay);
+    }
+
+    document.addEventListener("pointerdown", jsArmOnce, { once: true });
+    document.addEventListener("keydown", jsArmOnce, { once: true });
   }
 });

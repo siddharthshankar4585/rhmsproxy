@@ -32,14 +32,15 @@ img {
    min-height: 10vh;
    padding: 0 25px;
    box-sizing: border-box;
-   background-color: var(--background-nav);
-   box-shadow: 0 0 15px 2px rgba(0, 0, 0, 0.5);
-   -webkit-backdrop-filter: var(--backdrop-filter);
-   backdrop-filter: var(--backdrop-filter);
+   background: linear-gradient(135deg, rgba(12, 128, 118, 0.85), rgba(31, 178, 162, 0.78));
+   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.22);
+   -webkit-backdrop-filter: blur(10px);
+   backdrop-filter: blur(10px);
    transition: 0.35s ease;
-   border-radius: 15px;
-   width: fill;
-   margin: 15px;
+   border: 1px solid rgba(255, 255, 255, 0.25);
+   border-radius: 18px;
+   width: auto;
+   margin: 12px 14px;
    z-index: 100;
    position: fixed;
 }
@@ -54,14 +55,14 @@ img {
    float: left;
    text-transform: uppercase;
    font-size: 30px;
-   font-family: "Inter", sans-serif;
+   font-family: "Story Script", cursive;
    cursor: pointer;
    color: var(--text-primary);
    font-weight: 600;
    margin-left: 5px;
    font-style: normal;
    text-decoration: none;
-   transition: all 0.2s ease;
+   transition: all 0.25s ease;
    height: 5vh;
    top: 18%;
 }
@@ -84,11 +85,13 @@ img {
    color: var(--text-primary);
    font-weight: 800;
    right: 2%;
-   font-family: "Inter", sans-serif;
+   font-family: "Story Script", cursive;
    font-style: normal;
    text-decoration: none;
-   transition: all 0.2s ease;
+   transition: all 0.25s ease;
    transform: translateX(0%);
+   padding: 0.38rem 0.65rem;
+   border-radius: 10px;
 }
 
 @media (orientation: portrait) {
@@ -100,7 +103,7 @@ img {
       color: var(--text-primary);
       font-weight: 800;
       right: 2%;
-      font-family: "Inter", sans-serif;
+      font-family: "Story Script", cursive;
       font-style: normal;
       text-decoration: none;
       transition: all 0.2s ease;
@@ -110,7 +113,7 @@ img {
       text-transform: uppercase;
       cursor: pointer;
       font-weight: 800;
-      font-family: "Inter", sans-serif;
+      font-family: "Story Script", cursive;
       font-style: normal;
       font-size: 3vw;
       transform: translateX(-20%);
@@ -121,10 +124,11 @@ img {
    text-transform: uppercase;
    cursor: pointer;
    font-weight: 800;
-   font-family: "Inter", sans-serif;
+   font-family: "Story Script", cursive;
    font-style: normal;
    font-size: 3vh;
-   transform: translateX(-20%);
+   background: rgba(255, 255, 255, 0.17);
+   transform: translateY(-1px);
 }
 
 .navbar-icon {

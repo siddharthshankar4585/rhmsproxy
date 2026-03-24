@@ -34,19 +34,25 @@ if (form && input) {
 function processUrl(value, path) {
   let url = value.trim();
   const engine = localStorage.getItem("engine");
-  const searchUrl = engine ? engine : "https://duckduckgo.com/?q=";
 
   if (!isUrl(url)) {
-    url = searchUrl + url;
+    url = buildSearchUrl(url, engine);
   } else if (!(url.startsWith("https://") || url.startsWith("http://"))) {
     url = `https://${url}`;
   }
 
+  const blockedReason = getBlockedReason(url);
+  if (blockedReason) {
+    alert(blockedReason);
+    return;
+  }
+
   sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(url));
   const dy = localStorage.getItem("dy");
+  const forceDynamic = shouldUseDynamic(url);
 
-  if (dy === "true") {
-    window.location.href = `/a/q/${__uv$config.encodeUrl(url)}`;
+  if (dy === "true" || forceDynamic) {
+    window.location.href = `/a/${__uv$config.encodeUrl(url)}`;
   } else if (path) {
     location.href = path;
   } else {
@@ -63,7 +69,7 @@ function blank(value) {
 }
 
 function dy(value) {
-  processUrl(value, `/a/q/${__uv$config.encodeUrl(value)}`);
+  processUrl(value, `/a/${__uv$config.encodeUrl(value)}`);
 }
 
 function isUrl(val = "") {
@@ -72,3 +78,53 @@ function isUrl(val = "") {
   }
   return false;
 }
+
+function shouldUseDynamic(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return hostname === "poxel.io" || hostname.endsWith(".poxel.io");
+  } catch {
+    return false;
+  }
+}
+
+function getBlockedReason(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    if (hostname === "poxel.io" || hostname.endsWith(".poxel.io")) {
+      return "poxel.io is currently blocked by anti-bot/security verification and may not work on this proxy.";
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function buildSearchUrl(query, engine) {
+  const fallback = "https://duckduckgo.com/?q=";
+  const safeQuery = encodeURIComponent(query.trim());
+
+  if (!engine) {
+    return `${fallback}${safeQuery}`;
+  }
+
+  if (engine.includes("%s")) {
+    try {
+      const probe = engine.replace("%s", "test");
+      new URL(probe);
+      return engine.replace("%s", safeQuery);
+    } catch {
+      return `${fallback}${safeQuery}`;
+    }
+  }
+
+  try {
+    const normalizedBase = engine.endsWith("=") || engine.endsWith("/") ? engine : `${engine}`;
+    new URL(`${normalizedBase}test`);
+    return `${normalizedBase}${safeQuery}`;
+  } catch {
+    return `${fallback}${safeQuery}`;
+  }
+}
+
+
