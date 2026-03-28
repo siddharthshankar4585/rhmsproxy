@@ -1,4 +1,38 @@
 // tabs.js
+function shouldOpenDirectUrl(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return hostname === "duckduckgo.com"
+      || hostname.endsWith(".duckduckgo.com")
+      || hostname === "google.com"
+      || hostname.endsWith(".google.com")
+      || hostname === "bing.com"
+      || hostname.endsWith(".bing.com")
+      || hostname === "search.yahoo.com"
+      || hostname === "qwant.com"
+      || hostname.endsWith(".qwant.com")
+      || hostname === "startpage.com"
+      || hostname.endsWith(".startpage.com")
+      || hostname === "searchencrypt.com"
+      || hostname.endsWith(".searchencrypt.com")
+      || hostname === "ecosia.org"
+      || hostname.endsWith(".ecosia.org");
+  } catch {
+    return false;
+  }
+}
+
+function decodeUvUrl(value) {
+  try {
+    if (!value || typeof __uv$config?.decodeUrl !== "function") {
+      return "";
+    }
+    return __uv$config.decodeUrl(value);
+  } catch {
+    return "";
+  }
+}
+
 window.addEventListener("load", () => {
   navigator.serviceWorker.register("../sw.js?v=2025-04-15", { scope: "/a/" });
   const form = document.getElementById("fv");
@@ -7,6 +41,19 @@ window.addEventListener("load", () => {
   // Check if there's a URL in sessionStorage (from search redirect)
   const goUrl = sessionStorage.getItem("GoUrl");
   if (goUrl) {
+    const decodedUrl = decodeUvUrl(goUrl);
+    if (decodedUrl && shouldOpenDirectUrl(decodedUrl)) {
+      sessionStorage.removeItem("GoUrl");
+      window.location.href = decodedUrl;
+      return;
+    }
+
+    if (decodedUrl && /^http(s?):\/\//.test(decodedUrl) && window.location.hostname.toLowerCase().endsWith(".vercel.app")) {
+      sessionStorage.removeItem("GoUrl");
+        window.location.href = decodedUrl;
+        return;
+    }
+
     const iframeContainer = document.getElementById("frame-container");
     const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
     if (activeIframe) {
@@ -30,7 +77,7 @@ window.addEventListener("load", () => {
       return;
     }
 
-    if (shouldBypassProxyOnHost()) {
+    if (shouldOpenDirectUrl(url)) {
       window.location.href = url;
       return;
     }
@@ -124,7 +171,7 @@ document.addEventListener("DOMContentLoaded", event => {
       return;
     }
 
-    if (shouldBypassProxyOnHost()) {
+    if (shouldOpenDirectUrl(normalizedUrl)) {
       window.location.href = normalizedUrl;
       return;
     }
@@ -147,11 +194,6 @@ document.addEventListener("DOMContentLoaded", event => {
   }
 
   window.adminOpenProxyUrl = openAdminHijackUrl;
-
-  function shouldBypassProxyOnHost() {
-    const host = window.location.hostname.toLowerCase();
-    return host.endsWith(".vercel.app");
-  }
 
   addTabButton.addEventListener("click", () => {
     createNewTab();
@@ -195,7 +237,14 @@ document.addEventListener("DOMContentLoaded", event => {
         tabTitle.textContent = title;
       }
       newIframe.contentWindow.open = url => {
-        sessionStorage.setItem("URL", `/a/${__uv$config.encodeUrl(url)}`);
+        const normalizedOpenUrl = prependHttps(url);
+        if (shouldOpenDirectUrl(normalizedOpenUrl)) {
+          sessionStorage.setItem("URL", normalizedOpenUrl);
+        } else if (window.location.hostname.toLowerCase().endsWith(".vercel.app")) {
+          sessionStorage.setItem("URL", prependHttps(url));
+        } else {
+          sessionStorage.setItem("URL", `/a/${__uv$config.encodeUrl(url)}`);
+        }
         createNewTab();
         return null;
       };
@@ -212,7 +261,14 @@ document.addEventListener("DOMContentLoaded", event => {
         if (goUrl.includes("/e/")) {
           newIframe.src = window.location.origin + goUrl;
         } else {
-          newIframe.src = `${window.location.origin}/a/${goUrl}`;
+          const decodedGoUrl = decodeUvUrl(goUrl);
+          if (decodedGoUrl && shouldOpenDirectUrl(decodedGoUrl)) {
+            newIframe.src = decodedGoUrl;
+          } else if (/^http(s?):\/\//.test(decodedGoUrl) && window.location.hostname.toLowerCase().endsWith(".vercel.app")) {
+            newIframe.src = decodedGoUrl || "/";
+          } else {
+            newIframe.src = `${window.location.origin}/a/${goUrl}`;
+          }
         }
         sessionStorage.removeItem("GoUrl");
       } else {
@@ -220,13 +276,24 @@ document.addEventListener("DOMContentLoaded", event => {
       }
     } else if (tabCounter > 1) {
       if (url !== null) {
-        newIframe.src = window.location.origin + url;
+        if (shouldOpenDirectUrl(url) || /^http(s?):\/\//.test(url)) {
+          newIframe.src = url;
+        } else {
+          newIframe.src = window.location.origin + url;
+        }
         sessionStorage.removeItem("URL");
       } else if (goUrl !== null) {
         if (goUrl.includes("/e/")) {
           newIframe.src = window.location.origin + goUrl;
         } else {
-          newIframe.src = `${window.location.origin}/a/${goUrl}`;
+          const decodedGoUrl = decodeUvUrl(goUrl);
+          if (decodedGoUrl && shouldOpenDirectUrl(decodedGoUrl)) {
+            newIframe.src = decodedGoUrl;
+          } else if (/^http(s?):\/\//.test(decodedGoUrl) && window.location.hostname.toLowerCase().endsWith(".vercel.app")) {
+            newIframe.src = decodedGoUrl || "/";
+          } else {
+            newIframe.src = `${window.location.origin}/a/${goUrl}`;
+          }
         }
         sessionStorage.removeItem("GoUrl");
       } else {

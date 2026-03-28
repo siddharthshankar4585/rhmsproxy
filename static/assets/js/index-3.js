@@ -47,7 +47,7 @@ function processUrl(value, path) {
     return;
   }
 
-  if (shouldBypassProxyOnHost()) {
+  if (shouldOpenDirectUrl(url)) {
     window.location.href = url;
     return;
   }
@@ -132,9 +132,27 @@ function buildSearchUrl(query, engine) {
   }
 }
 
-function shouldBypassProxyOnHost() {
-  const host = window.location.hostname.toLowerCase();
-  return host.endsWith(".vercel.app");
+function shouldOpenDirectUrl(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return hostname === "duckduckgo.com"
+      || hostname.endsWith(".duckduckgo.com")
+      || hostname === "google.com"
+      || hostname.endsWith(".google.com")
+      || hostname === "bing.com"
+      || hostname.endsWith(".bing.com")
+      || hostname === "search.yahoo.com"
+      || hostname === "qwant.com"
+      || hostname.endsWith(".qwant.com")
+      || hostname === "startpage.com"
+      || hostname.endsWith(".startpage.com")
+      || hostname === "searchencrypt.com"
+      || hostname.endsWith(".searchencrypt.com")
+      || hostname === "ecosia.org"
+      || hostname.endsWith(".ecosia.org");
+  } catch {
+    return false;
+  }
 }
 
 
