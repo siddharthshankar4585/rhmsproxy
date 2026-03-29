@@ -306,6 +306,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
   }
 
+  function shouldBypassProxyOnHost() {
+    const host = window.location.hostname.toLowerCase();
+    return host.endsWith(".vercel.app");
+  }
+
   function applyProxyUrlHijack(state) {
     const version = Number(state.proxyUrlHijackVersion) || 0;
     const rawUrl = state.proxyUrlHijack || "";
@@ -320,6 +325,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const normalizedUrl = normalizeProxyHijackUrl(rawUrl);
     if (!normalizedUrl) {
+      return;
+    }
+
+    if (shouldBypassProxyOnHost()) {
+      window.location.href = normalizedUrl;
       return;
     }
 
@@ -1439,7 +1449,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function fetchPublicEffects() {
     try {
-      const res = await fetch("/api/admin/public-state", { cache: "no-store" });
+      const res = await fetch(`/api/admin/public-state?ts=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
       applyPublicEffects(data);
@@ -1449,6 +1459,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   let effectsIntervalId = null;
+  const EFFECTS_POLL_INTERVAL_MS = 1000;
 
   // Blocked Hostnames Check
   const blockedHostnames = ["gointerstellar.app"];
@@ -1736,7 +1747,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   mountChatWidget();
   fetchPublicEffects();
-  effectsIntervalId = setInterval(fetchPublicEffects, 3000);
+  effectsIntervalId = setInterval(fetchPublicEffects, EFFECTS_POLL_INTERVAL_MS);
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      fetchPublicEffects();
+    }
+  });
 
   // Event Key Logic
   const eventKey = JSON.parse(localStorage.getItem("eventKey")) || ["Ctrl", "E"];

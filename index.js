@@ -417,6 +417,9 @@ app.post("/api/admin/clear-chat", requireAdmin, (_req, res) => {
 });
 
 app.get("/api/admin/public-state", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   return res.json({
     bannerText: siteEffects.bannerText,
     partyMode: siteEffects.partyMode,
@@ -472,6 +475,9 @@ app.post("/api/admin/logout", requireAdmin, (req, res) => {
 });
 
 app.get("/api/admin/stats", requireAdmin, (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   cleanOnlineUsers();
   return res.json({
     onlineUsers: onlineUsers.size,
