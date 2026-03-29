@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createBareServer } from "@nebula-services/bare-server-node";
 import chalk from "chalk";
 import cookieParser from "cookie-parser";
@@ -32,11 +32,12 @@ const OWNER_CHAT_COLORS = ["#ff7a59", "#ffd166", "#7bdff2", "#b2f7ef", "#cdb4db"
 const SYSTEM_CHAT_COLOR = "#8bd8ff";
 const onlineUsers = new Map();
 const dailyOpens = new Map();
-const adminSessions = new Map(); // token -> expiry timestamp
+const adminSessions = new Map(); // best-effort local metrics for non-serverless runtimes
 const chatMessages = [];
 const chatSendCooldowns = new Map();
 let nextChatMessageId = 1;
 const ADMIN_SESSION_TTL = 2 * 60 * 60 * 1000; // 2 hours
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_CODE || config.adminCode;
 const adminLoginAttempts = new Map(); // ip -> { count, lockedUntil }
 const siteEffects = {
   bannerText: "",
@@ -177,6 +178,44 @@ function safeCompare(a, b) {
   return timingSafeEqual(bufA, bufB);
 }
 
+function signAdminSessionPayload(payload) {
+  return createHmac("sha256", ADMIN_SESSION_SECRET).update(payload).digest("base64url");
+}
+
+function createAdminSessionToken(now = Date.now()) {
+  const payload = Buffer.from(JSON.stringify({ exp: now + ADMIN_SESSION_TTL }), "utf8").toString("base64url");
+  const signature = signAdminSessionPayload(payload);
+  return `${payload}.${signature}`;
+}
+
+function verifyAdminSessionToken(token) {
+  if (typeof token !== "string") {
+    return false;
+  }
+
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) {
+    return false;
+  }
+
+  const expectedSignature = signAdminSessionPayload(payload);
+  if (!safeCompare(signature, expectedSignature)) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return Number.isFinite(parsed?.exp) && Date.now() <= parsed.exp;
+  } catch {
+    return false;
+  }
+}
+
+function getAdminTokenFromRequest(req) {
+  const auth = req.headers.authorization || "";
+  return auth.startsWith("Bearer ") ? auth.slice(7) : null;
+}
+
 function cleanAdminSessions() {
   const now = Date.now();
   for (const [token, expiry] of adminSessions.entries()) {
@@ -187,13 +226,12 @@ function cleanAdminSessions() {
 }
 
 function requireAdmin(req, res, next) {
-  const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  const token = getAdminTokenFromRequest(req);
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   cleanAdminSessions();
-  if (!adminSessions.has(token)) {
+  if (!adminSessions.has(token) && !verifyAdminSessionToken(token)) {
     return res.status(401).json({ error: "Invalid or expired session" });
   }
   return next();
@@ -422,13 +460,13 @@ app.post("/api/admin/login", (req, res) => {
   }
 
   adminLoginAttempts.delete(ip);
-  const token = randomUUID();
+  const token = createAdminSessionToken(now);
   adminSessions.set(token, now + ADMIN_SESSION_TTL);
   return res.json({ token });
 });
 
 app.post("/api/admin/logout", requireAdmin, (req, res) => {
-  const token = req.headers.authorization.slice(7);
+  const token = getAdminTokenFromRequest(req);
   adminSessions.delete(token);
   return res.json({ ok: true });
 });
@@ -439,7 +477,7 @@ app.get("/api/admin/stats", requireAdmin, (_req, res) => {
     onlineUsers: onlineUsers.size,
     openedToday: getTodaySet().size,
     cacheEntries: cache.size,
-    activeAdminSessions: adminSessions.size,
+    activeAdminSessions: Math.max(adminSessions.size, 1),
     partyMode: siteEffects.partyMode,
     chaosMode: siteEffects.chaosMode,
     hasBanner: Boolean(siteEffects.bannerText),
