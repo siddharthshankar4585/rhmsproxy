@@ -39,6 +39,7 @@ let nextChatMessageId = 1;
 const ADMIN_SESSION_TTL = 2 * 60 * 60 * 1000; // 2 hours
 const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_CODE || config.adminCode;
 const adminLoginAttempts = new Map(); // ip -> { count, lockedUntil }
+const DEFAULT_MAINTENANCE_MESSAGE = "Maintenance in progress. Please check back soon.";
 const siteEffects = {
   bannerText: "",
   partyMode: false,
@@ -51,7 +52,7 @@ const siteEffects = {
   popupVersion: 0,
   jumpscareVersion: 0,
   maintenanceMode: false,
-  maintenanceMessage: "Maintenance in progress. Please check back soon.",
+  maintenanceMessage: DEFAULT_MAINTENANCE_MESSAGE,
   clientRefreshVersion: 0,
   tabTitleOverride: "",
   tabFaviconOverride: "",
@@ -62,6 +63,43 @@ const siteEffects = {
 
 const takeoverThemes = new Set(["matrix", "emergency", "arcade", "gold"]);
 const weatherEffects = new Set(["snow", "rain", "fog", "hail", "lightning"]);
+
+function getActiveExclusiveEffects() {
+  const activeEffects = [];
+
+  if (siteEffects.bannerText) activeEffects.push("banner");
+  if (siteEffects.partyMode) activeEffects.push("party");
+  if (siteEffects.chaosMode) activeEffects.push("chaos");
+  if (siteEffects.takeoverTheme) activeEffects.push("takeover");
+  if (siteEffects.popupTitle || siteEffects.popupMessage) activeEffects.push("popup");
+  if (siteEffects.maintenanceMode) activeEffects.push("maintenance");
+  if (siteEffects.tabTitleOverride || siteEffects.tabFaviconOverride) activeEffects.push("tabHijack");
+  if (siteEffects.proxyUrlHijack) activeEffects.push("proxyUrlHijack");
+  if (siteEffects.weatherEffect) activeEffects.push("weather");
+
+  return activeEffects;
+}
+
+function isOnlyExclusiveEffectActive(effectName) {
+  const activeEffects = getActiveExclusiveEffects();
+  return activeEffects.length === 1 && activeEffects[0] === effectName;
+}
+
+function clearExclusiveEffects() {
+  siteEffects.bannerText = "";
+  siteEffects.partyMode = false;
+  siteEffects.chaosMode = false;
+  siteEffects.takeoverTheme = "";
+  siteEffects.popupTitle = "";
+  siteEffects.popupMessage = "";
+  siteEffects.popupButtonText = "Close";
+  siteEffects.maintenanceMode = false;
+  siteEffects.maintenanceMessage = DEFAULT_MAINTENANCE_MESSAGE;
+  siteEffects.tabTitleOverride = "";
+  siteEffects.tabFaviconOverride = "";
+  siteEffects.proxyUrlHijack = "";
+  siteEffects.weatherEffect = "";
+}
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -522,6 +560,7 @@ app.post("/api/admin/set-banner", requireAdmin, (req, res) => {
   if (text.length > 180) {
     return res.status(400).json({ error: "Banner text too long (max 180 chars)" });
   }
+  clearExclusiveEffects();
   siteEffects.bannerText = text;
   return res.json({ ok: true, bannerText: siteEffects.bannerText });
 });
@@ -532,8 +571,10 @@ app.post("/api/admin/clear-banner", requireAdmin, (_req, res) => {
 });
 
 app.post("/api/admin/toggle-party", requireAdmin, (_req, res) => {
-  siteEffects.partyMode = !siteEffects.partyMode;
-  if (siteEffects.partyMode) {
+  const disableParty = isOnlyExclusiveEffectActive("party");
+  clearExclusiveEffects();
+  if (!disableParty) {
+    siteEffects.partyMode = true;
     siteEffects.confettiVersion += 1;
   }
   return res.json({
@@ -544,7 +585,11 @@ app.post("/api/admin/toggle-party", requireAdmin, (_req, res) => {
 });
 
 app.post("/api/admin/toggle-chaos", requireAdmin, (_req, res) => {
-  siteEffects.chaosMode = !siteEffects.chaosMode;
+  const disableChaos = isOnlyExclusiveEffectActive("chaos");
+  clearExclusiveEffects();
+  if (!disableChaos) {
+    siteEffects.chaosMode = true;
+  }
   return res.json({ ok: true, chaosMode: siteEffects.chaosMode });
 });
 
@@ -553,6 +598,7 @@ app.post("/api/admin/set-takeover-theme", requireAdmin, (req, res) => {
   if (!takeoverThemes.has(theme)) {
     return res.status(400).json({ error: "Invalid takeover theme" });
   }
+  clearExclusiveEffects();
   siteEffects.takeoverTheme = theme;
   return res.json({ ok: true, takeoverTheme: siteEffects.takeoverTheme });
 });
@@ -580,6 +626,7 @@ app.post("/api/admin/set-popup", requireAdmin, (req, res) => {
     return res.status(400).json({ error: "Button text too long (max 24 chars)" });
   }
 
+  clearExclusiveEffects();
   siteEffects.popupTitle = title;
   siteEffects.popupMessage = message;
   siteEffects.popupButtonText = buttonText || "Close";
@@ -611,6 +658,7 @@ app.post("/api/admin/set-maintenance", requireAdmin, (req, res) => {
     return res.status(400).json({ error: "Maintenance message too long (max 180 chars)" });
   }
 
+  clearExclusiveEffects();
   siteEffects.maintenanceMode = true;
   siteEffects.maintenanceMessage = message;
   return res.json({
@@ -622,7 +670,7 @@ app.post("/api/admin/set-maintenance", requireAdmin, (req, res) => {
 
 app.post("/api/admin/clear-maintenance", requireAdmin, (_req, res) => {
   siteEffects.maintenanceMode = false;
-  siteEffects.maintenanceMessage = "Maintenance in progress. Please check back soon.";
+  siteEffects.maintenanceMessage = DEFAULT_MAINTENANCE_MESSAGE;
   return res.json({ ok: true, maintenanceMode: siteEffects.maintenanceMode });
 });
 
@@ -650,6 +698,7 @@ app.post("/api/admin/set-tab-hijack", requireAdmin, (req, res) => {
     return res.status(400).json({ error: "Favicon URL too long (max 400 chars)" });
   }
 
+  clearExclusiveEffects();
   siteEffects.tabTitleOverride = title;
   siteEffects.tabFaviconOverride = favicon;
 
@@ -675,6 +724,7 @@ app.post("/api/admin/set-proxy-url-hijack", requireAdmin, (req, res) => {
     return res.status(400).json({ error: "Proxy URL too long" });
   }
 
+  clearExclusiveEffects();
   siteEffects.proxyUrlHijack = url;
   siteEffects.proxyUrlHijackVersion += 1;
 
@@ -696,6 +746,7 @@ app.post("/api/admin/set-weather-effect", requireAdmin, (req, res) => {
   if (!weatherEffects.has(effect)) {
     return res.status(400).json({ error: "Invalid weather effect" });
   }
+  clearExclusiveEffects();
   siteEffects.weatherEffect = effect;
   return res.json({ ok: true, weatherEffect: siteEffects.weatherEffect });
 });
