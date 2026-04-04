@@ -16,6 +16,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const CHAT_POSITION_KEY = "proxyChatPosition";
   const LIVE_GAME_SESSION_KEY = "liveGameSessionId";
   const EFFECTS_REVISION_KEY = "adminEffectsRevision";
+  const MAX_ACTIVE_CONFETTI_PIECES = 72;
   let hasLoadedEffects = false;
   let lastConfettiVersion = 0;
   let lastJumpscareVersion = 0;
@@ -31,6 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let liveGameJoinInFlight = false;
   let liveGameTapInFlight = false;
   let liveGameLocalScore = 0;
+  let activeConfettiPieces = 0;
 
   function randomBetween(min, max) {
     return min + Math.random() * (max - min);
@@ -371,9 +373,12 @@ document.addEventListener("DOMContentLoaded", () => {
       widget.style.right = "auto";
     });
 
-    function finishDrag() {
+    function finishDrag(event) {
       if (!dragState) {
         return;
+      }
+      if (event?.pointerId !== undefined && header.hasPointerCapture?.(event.pointerId)) {
+        header.releasePointerCapture(event.pointerId);
       }
       dragState = null;
       widget.classList.remove("dragging");
@@ -382,6 +387,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     header.addEventListener("pointerup", finishDrag);
     header.addEventListener("pointercancel", finishDrag);
+    header.addEventListener("lostpointercapture", () => {
+      dragState = null;
+      widget.classList.remove("dragging");
+    });
     header.dataset.dragBound = "true";
   }
 
@@ -830,10 +839,12 @@ document.addEventListener("DOMContentLoaded", () => {
         align-items: center;
         justify-content: center;
         padding: 20px;
+        pointer-events: none;
         background: rgba(2, 11, 14, 0.55);
         backdrop-filter: blur(8px);
       }
       #admin-global-popup-card {
+        pointer-events: auto;
         width: min(560px, 92vw);
         border-radius: 18px;
         border: 1px solid rgba(255,255,255,.24);
@@ -1471,14 +1482,21 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function blastConfetti(pieceCount = 90) {
+    const availableSlots = Math.max(0, MAX_ACTIVE_CONFETTI_PIECES - activeConfettiPieces);
+    const safePieceCount = Math.min(pieceCount, availableSlots);
+    if (safePieceCount <= 0) {
+      return;
+    }
+
     const colors = ["#ff295f", "#24ff72", "#1da1ff", "#ff4fd8", "#ffd429", "#ffffff"];
-    for (let index = 0; index < pieceCount; index += 1) {
+    for (let index = 0; index < safePieceCount; index += 1) {
       const piece = document.createElement("div");
       piece.className = "admin-confetti-piece";
       piece.style.left = `${Math.random() * 100}vw`;
       piece.style.background = colors[index % colors.length];
       piece.style.transform = `translate3d(0, 0, 0) rotate(${Math.random() * 360}deg)`;
       document.body.appendChild(piece);
+      activeConfettiPieces += 1;
 
       const drift = (Math.random() - 0.5) * 220;
       const fall = window.innerHeight + 120 + Math.random() * 180;
@@ -1493,7 +1511,10 @@ document.addEventListener("DOMContentLoaded", () => {
         { duration, easing: "cubic-bezier(.18,.74,.34,.98)", fill: "forwards" },
       );
 
-      setTimeout(() => piece.remove(), duration + 60);
+      setTimeout(() => {
+        piece.remove();
+        activeConfettiPieces = Math.max(0, activeConfettiPieces - 1);
+      }, duration + 60);
     }
   }
 
@@ -1502,10 +1523,10 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    blastConfetti(36);
+    blastConfetti(14);
     confettiIntervalId = window.setInterval(() => {
-      blastConfetti(24);
-    }, 350);
+      blastConfetti(8);
+    }, 900);
   }
 
   function stopConfettiLoop() {
@@ -1600,7 +1621,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (effect === "rain") {
-      for (let index = 0; index < 90; index += 1) {
+      for (let index = 0; index < 36; index += 1) {
         const drop = document.createElement("div");
         drop.className = "admin-weather-rain-drop";
         drop.style.left = `${Math.random() * 100}%`;
@@ -1612,7 +1633,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (effect === "hail") {
-      for (let index = 0; index < 80; index += 1) {
+      for (let index = 0; index < 32; index += 1) {
         const hail = document.createElement("div");
         hail.className = "admin-weather-hail-drop";
         hail.style.left = `${Math.random() * 100}%`;
@@ -1624,7 +1645,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (effect === "lightning") {
-      for (let index = 0; index < 40; index += 1) {
+      for (let index = 0; index < 18; index += 1) {
         const drop = document.createElement("div");
         drop.className = "admin-weather-rain-drop";
         drop.style.left = `${Math.random() * 100}%`;
@@ -1638,7 +1659,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (effect === "snow") {
-      for (let index = 0; index < 65; index += 1) {
+      for (let index = 0; index < 28; index += 1) {
         const flake = document.createElement("div");
         flake.className = "admin-weather-snowflake";
         flake.textContent = Math.random() > 0.5 ? "*" : "❄";
