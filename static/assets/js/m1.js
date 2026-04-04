@@ -528,8 +528,6 @@ document.addEventListener("DOMContentLoaded", () => {
     ensureLiveGameRuntime(gameState);
     if (!liveGameRuntime.joinedAt) {
       liveGameRuntime.joinedAt = Date.now();
-    }
-    if (!liveGameRuntime.alive) {
       liveGameRuntime.alive = true;
     }
     if (!liveGameRuntime.rafId) {
@@ -737,14 +735,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const runnerLeft = 42;
     const runnerWidth = 34;
     const gravity = 0.00235;
-    const obstacleSpeed = 0.3 + Math.min(0.18, liveGameLocalSurvivalMs / 120000);
+    const obstacleSpeed = 0.18 + Math.min(0.1, liveGameLocalSurvivalMs / 180000);
 
     if (liveGameRuntime.alive && remainingMs > 0) {
       liveGameLocalSurvivalMs = Math.max(0, now - liveGameRuntime.joinedAt);
       liveGameRuntime.obstacleCooldownMs -= dt;
       if (liveGameRuntime.obstacleCooldownMs <= 0) {
         spawnLiveGameObstacle();
-        liveGameRuntime.obstacleCooldownMs = 880 + nextLiveGameRandom() * 780;
+        liveGameRuntime.obstacleCooldownMs = 1250 + nextLiveGameRandom() * 1050;
       }
 
       liveGameRuntime.runnerVelocity -= gravity * dt;
