@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const LIVE_GAME_SESSION_KEY = "liveGameSessionId";
   const EFFECTS_REVISION_KEY = "adminEffectsRevision";
   const MAX_ACTIVE_CONFETTI_PIECES = 72;
+  const LIVE_GAME_SYNC_INTERVAL_MS = 900;
   let hasLoadedEffects = false;
   let lastConfettiVersion = 0;
   let lastJumpscareVersion = 0;
@@ -30,9 +31,25 @@ document.addEventListener("DOMContentLoaded", () => {
   let chatPollIntervalId = null;
   let lastRenderedChatMessageId = 0;
   let liveGameJoinInFlight = false;
-  let liveGameTapInFlight = false;
-  let liveGameLocalScore = 0;
+  let liveGameSyncInFlight = false;
+  let liveGameLocalSurvivalMs = 0;
   let activeConfettiPieces = 0;
+  const liveGameRuntime = {
+    sessionId: 0,
+    active: false,
+    alive: false,
+    joinedAt: 0,
+    endsAt: 0,
+    seed: 0,
+    rngState: 0,
+    rafId: 0,
+    lastTickAt: 0,
+    lastSyncedAt: 0,
+    obstacleCooldownMs: 0,
+    runnerY: 0,
+    runnerVelocity: 0,
+    obstacles: [],
+  };
 
   function randomBetween(min, max) {
     return min + Math.random() * (max - min);
@@ -456,7 +473,60 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function hideLiveGameOverlay() {
+    if (liveGameRuntime.rafId) {
+      cancelAnimationFrame(liveGameRuntime.rafId);
+      liveGameRuntime.rafId = 0;
+    }
+    liveGameRuntime.active = false;
+    liveGameRuntime.obstacles = [];
     document.getElementById("admin-live-game-overlay")?.remove();
+  }
+
+  function formatLiveGameDuration(ms) {
+    const safeMs = Math.max(0, Number(ms) || 0);
+    return `${(safeMs / 1000).toFixed(safeMs >= 10_000 ? 0 : 1)}s`;
+  }
+
+  function nextLiveGameRandom() {
+    liveGameRuntime.rngState = (liveGameRuntime.rngState * 1664525 + 1013904223) >>> 0;
+    return liveGameRuntime.rngState / 4294967296;
+  }
+
+  function clearLiveGameObstacles() {
+    for (const obstacle of liveGameRuntime.obstacles) {
+      obstacle.element?.remove();
+    }
+    liveGameRuntime.obstacles = [];
+  }
+
+  function resetLiveGameRuntime(sessionId = 0) {
+    if (liveGameRuntime.rafId) {
+      cancelAnimationFrame(liveGameRuntime.rafId);
+    }
+    liveGameRuntime.sessionId = sessionId;
+    liveGameRuntime.active = false;
+    liveGameRuntime.alive = false;
+    liveGameRuntime.joinedAt = 0;
+    liveGameRuntime.endsAt = 0;
+    liveGameRuntime.seed = 0;
+    liveGameRuntime.rngState = 0;
+    liveGameRuntime.rafId = 0;
+    liveGameRuntime.lastTickAt = 0;
+    liveGameRuntime.lastSyncedAt = 0;
+    liveGameRuntime.obstacleCooldownMs = 0;
+    liveGameRuntime.runnerY = 0;
+    liveGameRuntime.runnerVelocity = 0;
+    clearLiveGameObstacles();
+  }
+
+  function triggerLiveGameJump() {
+    if (!liveGameRuntime.active || !liveGameRuntime.alive) {
+      return;
+    }
+    if (liveGameRuntime.runnerY > 4) {
+      return;
+    }
+    liveGameRuntime.runnerVelocity = 0.82;
   }
 
   function ensureLiveGameOverlay() {
@@ -472,15 +542,20 @@ document.addEventListener("DOMContentLoaded", () => {
         <div id="admin-live-game-topline">
           <div>
             <div id="admin-live-game-kicker">Live Game</div>
-            <h2 id="admin-live-game-title">Tap Rush</h2>
+            <h2 id="admin-live-game-title">Sky Sprint</h2>
           </div>
           <div id="admin-live-game-timer">0s</div>
         </div>
         <div id="admin-live-game-meta">
           <div id="admin-live-game-player">Joining...</div>
-          <div id="admin-live-game-score">Score: 0</div>
+          <div id="admin-live-game-score">Survived: 0.0s</div>
         </div>
-        <button id="admin-live-game-tap" type="button">Tap!</button>
+        <div id="admin-live-game-stage">
+          <div id="admin-live-game-track"></div>
+          <div id="admin-live-game-obstacles"></div>
+          <div id="admin-live-game-runner"></div>
+        </div>
+        <button id="admin-live-game-tap" type="button">Jump</button>
         <div id="admin-live-game-status"></div>
         <div id="admin-live-game-leaderboard-title">Leaderboard</div>
         <div id="admin-live-game-leaderboard"></div>
@@ -489,7 +564,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.body.appendChild(overlay);
 
-    document.getElementById("admin-live-game-tap")?.addEventListener("click", submitLiveGameTap);
+    document.getElementById("admin-live-game-tap")?.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      triggerLiveGameJump();
+    });
+    if (document.body.dataset.liveGameKeysBound !== "true") {
+      document.addEventListener("keydown", event => {
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+          return;
+        }
+        if (event.key === " " || event.key === "ArrowUp" || event.key.toLowerCase() === "w") {
+          event.preventDefault();
+          triggerLiveGameJump();
+        }
+      });
+      document.body.dataset.liveGameKeysBound = "true";
+    }
     return overlay;
   }
 
@@ -504,7 +595,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!Array.isArray(entries) || entries.length === 0) {
       const empty = document.createElement("div");
       empty.className = "admin-live-game-empty";
-      empty.textContent = "No scores yet. Be the first to tap.";
+      empty.textContent = "No runs yet. Stay alive to take the lead.";
       leaderboard.appendChild(empty);
       return;
     }
@@ -519,7 +610,7 @@ document.addEventListener("DOMContentLoaded", () => {
       row.innerHTML = `
         <span class="admin-live-game-rank">#${index + 1}</span>
         <span class="admin-live-game-name">${entry.name || "Player"}</span>
-        <span class="admin-live-game-points">${entry.score || 0}</span>
+        <span class="admin-live-game-points">${formatLiveGameDuration(entry.survivalMs || 0)}${entry.alive ? " alive" : ""}</span>
       `;
       fragment.appendChild(row);
     }
@@ -527,15 +618,195 @@ document.addEventListener("DOMContentLoaded", () => {
     leaderboard.appendChild(fragment);
   }
 
-  function renderLiveGameState(gameState) {
+  function renderLiveGameStage() {
+    const runner = document.getElementById("admin-live-game-runner");
+    const overlay = document.getElementById("admin-live-game-overlay");
+    if (runner) {
+      runner.style.transform = `translateY(${-liveGameRuntime.runnerY}px)`;
+    }
+    for (const obstacle of liveGameRuntime.obstacles) {
+      obstacle.element.style.transform = `translateX(${obstacle.x}px)`;
+      obstacle.element.style.height = `${obstacle.height}px`;
+      obstacle.element.style.width = `${obstacle.width}px`;
+    }
+    overlay?.classList.toggle("finished", !liveGameRuntime.alive);
+  }
+
+  async function syncLiveGameProgress(force = false) {
+    if (!liveGameRuntime.sessionId || liveGameSyncInFlight) {
+      return;
+    }
+    const now = Date.now();
+    if (!force && now - liveGameRuntime.lastSyncedAt < LIVE_GAME_SYNC_INTERVAL_MS) {
+      return;
+    }
+
+    liveGameSyncInFlight = true;
+    liveGameRuntime.lastSyncedAt = now;
+    try {
+      const res = await fetch("/api/live-game/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitorId: getChatVisitorId(),
+          name: getLiveGamePlayerName(),
+          survivalMs: liveGameLocalSurvivalMs,
+          alive: liveGameRuntime.alive,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return;
+      }
+      liveGameLocalSurvivalMs = Number(data?.player?.survivalMs) || liveGameLocalSurvivalMs;
+      if (data?.liveGame?.sessionId === liveGameRuntime.sessionId) {
+        renderLiveGameLeaderboard(data.liveGame.leaderboard || []);
+      }
+    } catch {
+      // Ignore transient live game sync errors silently.
+    } finally {
+      liveGameSyncInFlight = false;
+    }
+  }
+
+  function spawnLiveGameObstacle() {
+    const obstacleLayer = document.getElementById("admin-live-game-obstacles");
+    const stage = document.getElementById("admin-live-game-stage");
+    if (!obstacleLayer || !stage) {
+      return;
+    }
+
+    const obstacle = document.createElement("div");
+    obstacle.className = "admin-live-game-obstacle";
+    obstacleLayer.appendChild(obstacle);
+
+    liveGameRuntime.obstacles.push({
+      x: stage.clientWidth + 24,
+      width: 24 + Math.round(nextLiveGameRandom() * 18),
+      height: 30 + Math.round(nextLiveGameRandom() * 42),
+      element: obstacle,
+    });
+  }
+
+  function finishLiveGameRun() {
+    if (!liveGameRuntime.alive) {
+      return;
+    }
+    liveGameRuntime.alive = false;
+    syncLiveGameProgress(true);
+    const status = document.getElementById("admin-live-game-status");
+    if (status) {
+      status.textContent = `Crashed at ${formatLiveGameDuration(liveGameLocalSurvivalMs)}. Wait for the next round or reset.`;
+    }
+  }
+
+  function tickLiveGame(timestamp) {
+    if (!liveGameRuntime.active || !liveGameRuntime.sessionId) {
+      liveGameRuntime.rafId = 0;
+      return;
+    }
+
+    if (!liveGameRuntime.lastTickAt) {
+      liveGameRuntime.lastTickAt = timestamp;
+    }
+
+    const dt = Math.min(34, timestamp - liveGameRuntime.lastTickAt || 16);
+    liveGameRuntime.lastTickAt = timestamp;
+    const now = Date.now();
+    const remainingMs = Math.max(0, liveGameRuntime.endsAt - now);
+    const stage = document.getElementById("admin-live-game-stage");
+    const stageWidth = stage?.clientWidth || 320;
+    const runnerLeft = 42;
+    const runnerWidth = 34;
+    const gravity = 0.00235;
+    const obstacleSpeed = 0.3 + Math.min(0.18, liveGameLocalSurvivalMs / 120000);
+
+    if (liveGameRuntime.alive && remainingMs > 0) {
+      liveGameLocalSurvivalMs = Math.max(0, now - liveGameRuntime.joinedAt);
+      liveGameRuntime.obstacleCooldownMs -= dt;
+      if (liveGameRuntime.obstacleCooldownMs <= 0) {
+        spawnLiveGameObstacle();
+        liveGameRuntime.obstacleCooldownMs = 880 + nextLiveGameRandom() * 780;
+      }
+
+      liveGameRuntime.runnerVelocity -= gravity * dt;
+      liveGameRuntime.runnerY = Math.max(0, liveGameRuntime.runnerY + liveGameRuntime.runnerVelocity * dt);
+      if (liveGameRuntime.runnerY === 0 && liveGameRuntime.runnerVelocity < 0) {
+        liveGameRuntime.runnerVelocity = 0;
+      }
+
+      liveGameRuntime.obstacles = liveGameRuntime.obstacles.filter(obstacle => {
+        obstacle.x -= obstacleSpeed * dt * 60 / 16;
+        const horizontalHit = obstacle.x < runnerLeft + runnerWidth && obstacle.x + obstacle.width > runnerLeft;
+        const verticalHit = liveGameRuntime.runnerY < obstacle.height - 4;
+        if (horizontalHit && verticalHit) {
+          finishLiveGameRun();
+        }
+        if (obstacle.x + obstacle.width < -24) {
+          obstacle.element.remove();
+          return false;
+        }
+        return true;
+      });
+
+      syncLiveGameProgress(false);
+    }
+
+    if (remainingMs <= 0) {
+      liveGameRuntime.active = false;
+      liveGameRuntime.alive = false;
+      syncLiveGameProgress(true);
+    }
+
+    renderLiveGameStage();
+    renderLiveGameState({
+      active: true,
+      sessionId: liveGameRuntime.sessionId,
+      title: document.getElementById("admin-live-game-title")?.textContent || "Sky Sprint",
+      buttonLabel: document.getElementById("admin-live-game-tap")?.textContent || "Jump",
+      endsAt: liveGameRuntime.endsAt,
+      totalPlayers: Number(document.getElementById("admin-live-game-overlay")?.dataset.totalPlayers || "0"),
+      leaderboard: [],
+    }, true);
+
+    if (liveGameRuntime.active || liveGameRuntime.alive) {
+      liveGameRuntime.rafId = requestAnimationFrame(tickLiveGame);
+    } else {
+      liveGameRuntime.rafId = 0;
+    }
+  }
+
+  function ensureLiveGameRuntime(gameState) {
+    const sessionId = Number(gameState?.sessionId) || 0;
+    if (!sessionId) {
+      return;
+    }
+
+    if (liveGameRuntime.sessionId !== sessionId) {
+      resetLiveGameRuntime(sessionId);
+      liveGameRuntime.seed = Number(gameState?.seed) || sessionId;
+      liveGameRuntime.rngState = liveGameRuntime.seed || sessionId;
+      liveGameRuntime.obstacleCooldownMs = 900;
+    }
+
+    liveGameRuntime.active = Boolean(gameState?.active);
+    liveGameRuntime.endsAt = Number(gameState?.endsAt) || 0;
+    if (!liveGameRuntime.joinedAt) {
+      liveGameRuntime.joinedAt = Date.now() - liveGameLocalSurvivalMs;
+    }
+  }
+
+  function renderLiveGameState(gameState, preserveLeaderboard = false) {
     if (!gameState?.active) {
       hideLiveGameOverlay();
       setSavedLiveGameSessionId(0);
       lastLiveGameSessionId = Number(gameState?.sessionId) || lastLiveGameSessionId;
+      resetLiveGameRuntime(Number(gameState?.sessionId) || 0);
       return;
     }
 
     const overlay = ensureLiveGameOverlay();
+    ensureLiveGameRuntime(gameState);
     const title = document.getElementById("admin-live-game-title");
     const timer = document.getElementById("admin-live-game-timer");
     const player = document.getElementById("admin-live-game-player");
@@ -544,7 +815,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const tapButton = document.getElementById("admin-live-game-tap");
 
     if (title) {
-      title.textContent = gameState.title || "Tap Rush";
+      title.textContent = gameState.title || "Sky Sprint";
     }
 
     const remainingMs = Math.max(0, Number(gameState.endsAt || 0) - Date.now());
@@ -557,20 +828,29 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (score) {
-      score.textContent = `Score: ${liveGameLocalScore}`;
+      score.textContent = `Survived: ${formatLiveGameDuration(liveGameLocalSurvivalMs)}`;
     }
 
     if (status) {
-      status.textContent = remainingMs > 0 ? `Players: ${gameState.totalPlayers || 0}` : "Final scores";
+      if (liveGameRuntime.alive && remainingMs > 0) {
+        status.textContent = `Stay alive. Players: ${gameState.totalPlayers || 0}`;
+      } else if (remainingMs > 0) {
+        status.textContent = `Round live. Players: ${gameState.totalPlayers || 0}`;
+      } else {
+        status.textContent = "Final leaderboard";
+      }
     }
 
     if (tapButton) {
-      tapButton.textContent = gameState.buttonLabel || "Tap!";
-      tapButton.disabled = liveGameTapInFlight || remainingMs <= 0;
+      tapButton.textContent = gameState.buttonLabel || "Jump";
+      tapButton.disabled = !liveGameRuntime.alive || remainingMs <= 0;
     }
 
-    overlay.classList.toggle("finished", remainingMs <= 0);
-    renderLiveGameLeaderboard(gameState.leaderboard || []);
+    overlay.dataset.totalPlayers = String(gameState.totalPlayers || 0);
+    overlay.classList.toggle("finished", remainingMs <= 0 || !liveGameRuntime.alive);
+    if (!preserveLeaderboard) {
+      renderLiveGameLeaderboard(gameState.leaderboard || []);
+    }
   }
 
   async function joinLiveGame(gameState) {
@@ -598,42 +878,18 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       setSavedLiveGameSessionId(currentSessionId);
       lastLiveGameSessionId = currentSessionId;
-      liveGameLocalScore = Number(data?.player?.score) || 0;
+      liveGameLocalSurvivalMs = Number(data?.player?.survivalMs) || 0;
+      ensureLiveGameRuntime(data?.liveGame || gameState);
+      liveGameRuntime.joinedAt = Date.now() - liveGameLocalSurvivalMs;
+      liveGameRuntime.alive = data?.player?.alive !== false;
+      if (!liveGameRuntime.rafId) {
+        liveGameRuntime.rafId = requestAnimationFrame(tickLiveGame);
+      }
       renderLiveGameState(data?.liveGame || gameState);
     } catch {
       // Ignore transient live game join errors silently.
     } finally {
       liveGameJoinInFlight = false;
-    }
-  }
-
-  async function submitLiveGameTap() {
-    const sessionId = getSavedLiveGameSessionId();
-    if (!sessionId || liveGameTapInFlight) {
-      return;
-    }
-
-    liveGameTapInFlight = true;
-    try {
-      const res = await fetch("/api/live-game/score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          visitorId: getChatVisitorId(),
-          name: getLiveGamePlayerName(),
-          increment: 1,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        return;
-      }
-      liveGameLocalScore = Number(data?.player?.score) || liveGameLocalScore;
-      renderLiveGameState(data?.liveGame || null);
-    } catch {
-      // Ignore transient scoring errors silently.
-    } finally {
-      liveGameTapInFlight = false;
     }
   }
 
@@ -948,6 +1204,65 @@ document.addEventListener("DOMContentLoaded", () => {
         margin-top: 14px;
         font-size: 13px;
         color: rgba(243,255,253,.82);
+      }
+      #admin-live-game-stage {
+        position: relative;
+        overflow: hidden;
+        height: 148px;
+        margin-top: 14px;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,.18);
+        background: linear-gradient(180deg, rgba(164, 230, 255, .18), rgba(25, 74, 120, .22) 55%, rgba(15, 34, 49, .66) 56%, rgba(10, 24, 34, .88) 100%);
+      }
+      #admin-live-game-track {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 22px;
+        height: 3px;
+        background: repeating-linear-gradient(to right, rgba(255,255,255,.3) 0 18px, transparent 18px 30px);
+      }
+      #admin-live-game-obstacles {
+        position: absolute;
+        inset: 0;
+      }
+      #admin-live-game-runner,
+      .admin-live-game-obstacle {
+        position: absolute;
+        bottom: 22px;
+      }
+      #admin-live-game-runner {
+        left: 42px;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: linear-gradient(145deg, #9fffe7, #45ddb4);
+        box-shadow: 0 10px 18px rgba(0,0,0,.25);
+        will-change: transform;
+      }
+      #admin-live-game-runner::before,
+      #admin-live-game-runner::after {
+        content: "";
+        position: absolute;
+        top: 8px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #052b1f;
+      }
+      #admin-live-game-runner::before {
+        left: 8px;
+      }
+      #admin-live-game-runner::after {
+        right: 8px;
+      }
+      .admin-live-game-obstacle {
+        width: 28px;
+        min-height: 28px;
+        border-radius: 8px 8px 3px 3px;
+        background: linear-gradient(180deg, rgba(255, 157, 101, .96), rgba(158, 67, 38, .96));
+        box-shadow: 0 10px 18px rgba(0,0,0,.22);
+        will-change: transform;
       }
       #admin-live-game-tap {
         width: 100%;
@@ -1987,9 +2302,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (currentLiveGameSessionId !== lastLiveGameSessionId) {
+      liveGameLocalSurvivalMs = 0;
       if (!state.liveGame?.active) {
-        liveGameLocalScore = 0;
+        liveGameLocalSurvivalMs = 0;
+        resetLiveGameRuntime(0);
         setSavedLiveGameSessionId(0);
+      } else {
+        resetLiveGameRuntime(currentLiveGameSessionId);
       }
       lastLiveGameSessionId = currentLiveGameSessionId;
     }

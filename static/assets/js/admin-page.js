@@ -789,8 +789,8 @@
       setStatus((data && data.error) || "Failed to start live game.", true);
       return;
     }
-    await logSystemCommand(`start live game ${title || "Tap Rush"}`);
-    setStatus("Live game started for everyone.");
+    await logSystemCommand(`start live game ${title || "Sky Sprint"}`);
+    setStatus("Runner game started for everyone.");
     await loadStats();
     refreshPreview();
   });
@@ -800,8 +800,8 @@
       setStatus((data && data.error) || "Failed to reset live game.", true);
       return;
     }
-    await logSystemCommand("reset live game scores");
-    setStatus("Live game scores reset.");
+    await logSystemCommand("reset live runner game");
+    setStatus("Runner game reset.");
     await loadStats();
     refreshPreview();
   });

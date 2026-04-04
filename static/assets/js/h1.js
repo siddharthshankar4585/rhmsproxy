@@ -52,13 +52,21 @@ if (!inFrame && !navigator.userAgent.includes("Firefox") && localStorage.getItem
 // Particles
 document.addEventListener("DOMContentLoaded", event => {
   if (window.localStorage.getItem("Particles") === "true") {
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    const isCoarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
+    const lowPowerDevice = (navigator.hardwareConcurrency || 4) <= 4;
+    if (prefersReducedMotion || lowPowerDevice) {
+      return;
+    }
+
+    const particleCount = isCoarsePointer ? 28 : 60;
     const particlesConfig = {
       particles: {
         number: {
-          value: 200,
+          value: particleCount,
           density: {
             enable: true,
-            value_area: 600,
+            value_area: 900,
           },
         },
         color: {
@@ -125,7 +133,7 @@ document.addEventListener("DOMContentLoaded", event => {
         detect_on: "canvas",
         events: {
           onhover: {
-            enable: true,
+            enable: !isCoarsePointer,
             mode: "repulse",
           },
           onclick: {
@@ -149,8 +157,8 @@ document.addEventListener("DOMContentLoaded", event => {
             speed: 3,
           },
           repulse: {
-            distance: 40,
-            duration: 0.4,
+            distance: 28,
+            duration: 0.2,
           },
           push: {
             particles_nb: 4,

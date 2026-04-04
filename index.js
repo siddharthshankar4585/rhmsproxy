@@ -66,11 +66,13 @@ const siteEffects = {
 const liveGameState = {
   active: false,
   sessionId: 0,
-  title: "Tap Rush",
-  buttonLabel: "Tap!",
+  mode: "runner",
+  title: "Sky Sprint",
+  buttonLabel: "Jump",
   durationSeconds: LIVE_GAME_DEFAULT_DURATION_SECONDS,
   startedAt: 0,
   endsAt: 0,
+  seed: 0,
   scores: new Map(),
 };
 
@@ -102,13 +104,20 @@ function isOnlyExclusiveEffectActive(effectName) {
 function getLiveGameLeaderboard(limit = 8) {
   return Array.from(liveGameState.scores.values())
     .sort((left, right) => {
-      if (right.score !== left.score) {
-        return right.score - left.score;
+      const rightScore = Math.max(right.bestSurvivalMs || 0, right.currentSurvivalMs || 0);
+      const leftScore = Math.max(left.bestSurvivalMs || 0, left.currentSurvivalMs || 0);
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore;
       }
       return left.joinedAt - right.joinedAt;
     })
     .slice(0, limit)
-    .map(({ visitorId, name, score }) => ({ visitorId, name, score }));
+    .map(({ visitorId, name, bestSurvivalMs, currentSurvivalMs, alive }) => ({
+      visitorId,
+      name,
+      survivalMs: Math.max(bestSurvivalMs || 0, currentSurvivalMs || 0),
+      alive: Boolean(alive),
+    }));
 }
 
 function resetLiveGameState(bumpSession = true) {
@@ -116,11 +125,13 @@ function resetLiveGameState(bumpSession = true) {
   if (bumpSession) {
     liveGameState.sessionId += 1;
   }
-  liveGameState.title = "Tap Rush";
-  liveGameState.buttonLabel = "Tap!";
+  liveGameState.mode = "runner";
+  liveGameState.title = "Sky Sprint";
+  liveGameState.buttonLabel = "Jump";
   liveGameState.durationSeconds = LIVE_GAME_DEFAULT_DURATION_SECONDS;
   liveGameState.startedAt = 0;
   liveGameState.endsAt = 0;
+  liveGameState.seed = 0;
   liveGameState.scores = new Map();
 }
 
@@ -138,11 +149,13 @@ function getLiveGamePayload() {
   return {
     active: liveGameState.active,
     sessionId: liveGameState.sessionId,
+    mode: liveGameState.mode,
     title: liveGameState.title,
     buttonLabel: liveGameState.buttonLabel,
     durationSeconds: liveGameState.durationSeconds,
     startedAt: liveGameState.startedAt,
     endsAt: liveGameState.endsAt,
+    seed: liveGameState.seed,
     leaderboard: getLiveGameLeaderboard(),
     totalPlayers: liveGameState.scores.size,
   };
@@ -166,7 +179,10 @@ function upsertLiveGamePlayer(visitorId, preferredName = "") {
   const player = {
     visitorId,
     name: sanitizedName,
-    score: 0,
+    bestSurvivalMs: 0,
+    currentSurvivalMs: 0,
+    alive: true,
+    finishedAt: 0,
     joinedAt: Date.now(),
   };
   liveGameState.scores.set(visitorId, player);
@@ -564,7 +580,8 @@ app.post("/api/live-game/join", (req, res) => {
     player: {
       visitorId: player.visitorId,
       name: player.name,
-      score: player.score,
+      survivalMs: Math.max(player.bestSurvivalMs || 0, player.currentSurvivalMs || 0),
+      alive: Boolean(player.alive),
     },
   });
 });
@@ -572,8 +589,8 @@ app.post("/api/live-game/join", (req, res) => {
 app.post("/api/live-game/score", (req, res) => {
   const visitorId = getVisitorId(req);
   const name = sanitizeChatName(req.body?.name);
-  const increment = Number(req.body?.increment);
-  const safeIncrement = Number.isFinite(increment) && increment > 0 && increment <= 5 ? Math.floor(increment) : 1;
+  const survivalMs = Number(req.body?.survivalMs);
+  const alive = req.body?.alive !== false;
   const player = upsertLiveGamePlayer(visitorId, name);
   const payload = getLiveGamePayload();
 
@@ -581,7 +598,17 @@ app.post("/api/live-game/score", (req, res) => {
     return res.status(409).json({ error: "No live game is running.", liveGame: payload });
   }
 
-  player.score += safeIncrement;
+  const maxSurvivalMs = Math.max(0, liveGameState.endsAt - (player.joinedAt || liveGameState.startedAt));
+  const safeSurvivalMs = Number.isFinite(survivalMs)
+    ? Math.max(0, Math.min(Math.floor(survivalMs), maxSurvivalMs))
+    : 0;
+
+  player.currentSurvivalMs = safeSurvivalMs;
+  player.bestSurvivalMs = Math.max(player.bestSurvivalMs || 0, safeSurvivalMs);
+  player.alive = Boolean(alive) && Date.now() < liveGameState.endsAt;
+  if (!player.alive) {
+    player.finishedAt = Date.now();
+  }
 
   return res.json({
     ok: true,
@@ -589,7 +616,8 @@ app.post("/api/live-game/score", (req, res) => {
     player: {
       visitorId: player.visitorId,
       name: player.name,
-      score: player.score,
+      survivalMs: Math.max(player.bestSurvivalMs || 0, player.currentSurvivalMs || 0),
+      alive: Boolean(player.alive),
     },
   });
 });
@@ -706,11 +734,13 @@ app.post("/api/admin/live-game/start", requireAdmin, (req, res) => {
 
   clearExclusiveEffects();
   liveGameState.active = true;
-  liveGameState.title = title || "Tap Rush";
-  liveGameState.buttonLabel = buttonLabel || "Tap!";
+  liveGameState.mode = "runner";
+  liveGameState.title = title || "Sky Sprint";
+  liveGameState.buttonLabel = buttonLabel || "Jump";
   liveGameState.durationSeconds = safeDurationSeconds;
   liveGameState.startedAt = Date.now();
   liveGameState.endsAt = liveGameState.startedAt + safeDurationSeconds * 1000;
+  liveGameState.seed = Math.floor(Math.random() * 1_000_000_000);
   liveGameState.scores = new Map();
 
   return res.json({ ok: true, liveGame: getLiveGamePayload() });
@@ -721,6 +751,7 @@ app.post("/api/admin/live-game/end", requireAdmin, (_req, res) => {
   if (!liveGameState.active) {
     return res.json({ ok: true, liveGame: getLiveGamePayload() });
   }
+  markSiteEffectsUpdated();
   resetLiveGameState();
   return res.json({ ok: true, liveGame: getLiveGamePayload() });
 });
@@ -729,9 +760,12 @@ app.post("/api/admin/live-game/reset", requireAdmin, (_req, res) => {
   if (!liveGameState.active) {
     return res.status(409).json({ error: "No live game is running." });
   }
+  markSiteEffectsUpdated();
+  liveGameState.sessionId += 1;
   liveGameState.scores = new Map();
   liveGameState.startedAt = Date.now();
   liveGameState.endsAt = liveGameState.startedAt + liveGameState.durationSeconds * 1000;
+  liveGameState.seed = Math.floor(Math.random() * 1_000_000_000);
   return res.json({ ok: true, liveGame: getLiveGamePayload() });
 });
 
