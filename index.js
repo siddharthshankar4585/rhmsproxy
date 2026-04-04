@@ -40,6 +40,8 @@ const ADMIN_SESSION_TTL = 2 * 60 * 60 * 1000; // 2 hours
 const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_CODE || config.adminCode;
 const adminLoginAttempts = new Map(); // ip -> { count, lockedUntil }
 const DEFAULT_MAINTENANCE_MESSAGE = "Maintenance in progress. Please check back soon.";
+const LIVE_GAME_DEFAULT_DURATION_SECONDS = 45;
+const LIVE_GAME_MAX_DURATION_SECONDS = 300;
 const siteEffects = {
   bannerText: "",
   partyMode: false,
@@ -60,6 +62,16 @@ const siteEffects = {
   proxyUrlHijackVersion: 0,
   weatherEffect: "",
 };
+const liveGameState = {
+  active: false,
+  sessionId: 0,
+  title: "Tap Rush",
+  buttonLabel: "Tap!",
+  durationSeconds: LIVE_GAME_DEFAULT_DURATION_SECONDS,
+  startedAt: 0,
+  endsAt: 0,
+  scores: new Map(),
+};
 
 const takeoverThemes = new Set(["matrix", "emergency", "arcade", "gold"]);
 const weatherEffects = new Set(["snow", "rain", "fog", "hail", "lightning"]);
@@ -76,6 +88,7 @@ function getActiveExclusiveEffects() {
   if (siteEffects.tabTitleOverride || siteEffects.tabFaviconOverride) activeEffects.push("tabHijack");
   if (siteEffects.proxyUrlHijack) activeEffects.push("proxyUrlHijack");
   if (siteEffects.weatherEffect) activeEffects.push("weather");
+  if (liveGameState.active) activeEffects.push("liveGame");
 
   return activeEffects;
 }
@@ -83,6 +96,80 @@ function getActiveExclusiveEffects() {
 function isOnlyExclusiveEffectActive(effectName) {
   const activeEffects = getActiveExclusiveEffects();
   return activeEffects.length === 1 && activeEffects[0] === effectName;
+}
+
+function getLiveGameLeaderboard(limit = 8) {
+  return Array.from(liveGameState.scores.values())
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return left.joinedAt - right.joinedAt;
+    })
+    .slice(0, limit)
+    .map(({ visitorId, name, score }) => ({ visitorId, name, score }));
+}
+
+function resetLiveGameState(bumpSession = true) {
+  liveGameState.active = false;
+  if (bumpSession) {
+    liveGameState.sessionId += 1;
+  }
+  liveGameState.title = "Tap Rush";
+  liveGameState.buttonLabel = "Tap!";
+  liveGameState.durationSeconds = LIVE_GAME_DEFAULT_DURATION_SECONDS;
+  liveGameState.startedAt = 0;
+  liveGameState.endsAt = 0;
+  liveGameState.scores = new Map();
+}
+
+function ensureLiveGameStateCurrent() {
+  if (!liveGameState.active) {
+    return;
+  }
+  if (Date.now() >= liveGameState.endsAt) {
+    resetLiveGameState(false);
+  }
+}
+
+function getLiveGamePayload() {
+  ensureLiveGameStateCurrent();
+  return {
+    active: liveGameState.active,
+    sessionId: liveGameState.sessionId,
+    title: liveGameState.title,
+    buttonLabel: liveGameState.buttonLabel,
+    durationSeconds: liveGameState.durationSeconds,
+    startedAt: liveGameState.startedAt,
+    endsAt: liveGameState.endsAt,
+    leaderboard: getLiveGameLeaderboard(),
+    totalPlayers: liveGameState.scores.size,
+  };
+}
+
+function upsertLiveGamePlayer(visitorId, preferredName = "") {
+  ensureLiveGameStateCurrent();
+  if (!liveGameState.active) {
+    return null;
+  }
+
+  const sanitizedName = sanitizeChatName(preferredName) || `Player ${String(visitorId).slice(-4)}`;
+  const existing = liveGameState.scores.get(visitorId);
+  if (existing) {
+    if (sanitizedName) {
+      existing.name = sanitizedName;
+    }
+    return existing;
+  }
+
+  const player = {
+    visitorId,
+    name: sanitizedName,
+    score: 0,
+    joinedAt: Date.now(),
+  };
+  liveGameState.scores.set(visitorId, player);
+  return player;
 }
 
 function clearExclusiveEffects() {
@@ -99,6 +186,7 @@ function clearExclusiveEffects() {
   siteEffects.tabFaviconOverride = "";
   siteEffects.proxyUrlHijack = "";
   siteEffects.weatherEffect = "";
+  resetLiveGameState();
 }
 
 function todayKey() {
@@ -454,6 +542,52 @@ app.post("/api/admin/clear-chat", requireAdmin, (_req, res) => {
   return res.json({ ok: true, messages: [] });
 });
 
+app.post("/api/live-game/join", (req, res) => {
+  const visitorId = getVisitorId(req);
+  const name = sanitizeChatName(req.body?.name);
+  const player = upsertLiveGamePlayer(visitorId, name);
+  const payload = getLiveGamePayload();
+
+  if (!payload.active || !player) {
+    return res.status(409).json({ error: "No live game is running.", liveGame: payload });
+  }
+
+  return res.json({
+    ok: true,
+    liveGame: payload,
+    player: {
+      visitorId: player.visitorId,
+      name: player.name,
+      score: player.score,
+    },
+  });
+});
+
+app.post("/api/live-game/score", (req, res) => {
+  const visitorId = getVisitorId(req);
+  const name = sanitizeChatName(req.body?.name);
+  const increment = Number(req.body?.increment);
+  const safeIncrement = Number.isFinite(increment) && increment > 0 && increment <= 5 ? Math.floor(increment) : 1;
+  const player = upsertLiveGamePlayer(visitorId, name);
+  const payload = getLiveGamePayload();
+
+  if (!payload.active || !player) {
+    return res.status(409).json({ error: "No live game is running.", liveGame: payload });
+  }
+
+  player.score += safeIncrement;
+
+  return res.json({
+    ok: true,
+    liveGame: getLiveGamePayload(),
+    player: {
+      visitorId: player.visitorId,
+      name: player.name,
+      score: player.score,
+    },
+  });
+});
+
 app.get("/api/admin/public-state", (_req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -477,6 +611,7 @@ app.get("/api/admin/public-state", (_req, res) => {
     proxyUrlHijack: siteEffects.proxyUrlHijack,
     proxyUrlHijackVersion: siteEffects.proxyUrlHijackVersion,
     weatherEffect: siteEffects.weatherEffect,
+    liveGame: getLiveGamePayload(),
   });
 });
 
@@ -533,6 +668,8 @@ app.get("/api/admin/stats", requireAdmin, (_req, res) => {
     tabHijackActive: Boolean(siteEffects.tabTitleOverride || siteEffects.tabFaviconOverride),
     proxyUrlHijackActive: Boolean(siteEffects.proxyUrlHijack),
     weatherEffect: siteEffects.weatherEffect || "OFF",
+    liveGameActive: liveGameState.active,
+    liveGamePlayers: liveGameState.scores.size,
     uptime: process.uptime(),
   });
 });
@@ -550,6 +687,45 @@ app.post("/api/admin/clear-online", requireAdmin, (_req, res) => {
 app.post("/api/admin/clear-cache", requireAdmin, (_req, res) => {
   cache.clear();
   return res.json({ ok: true });
+});
+
+app.post("/api/admin/live-game/start", requireAdmin, (req, res) => {
+  const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+  const buttonLabel = typeof req.body?.buttonLabel === "string" ? req.body.buttonLabel.trim() : "";
+  const durationSeconds = Number(req.body?.durationSeconds);
+  const safeDurationSeconds = Number.isFinite(durationSeconds)
+    ? Math.max(10, Math.min(Math.floor(durationSeconds), LIVE_GAME_MAX_DURATION_SECONDS))
+    : LIVE_GAME_DEFAULT_DURATION_SECONDS;
+
+  clearExclusiveEffects();
+  liveGameState.active = true;
+  liveGameState.title = title || "Tap Rush";
+  liveGameState.buttonLabel = buttonLabel || "Tap!";
+  liveGameState.durationSeconds = safeDurationSeconds;
+  liveGameState.startedAt = Date.now();
+  liveGameState.endsAt = liveGameState.startedAt + safeDurationSeconds * 1000;
+  liveGameState.scores = new Map();
+
+  return res.json({ ok: true, liveGame: getLiveGamePayload() });
+});
+
+app.post("/api/admin/live-game/end", requireAdmin, (_req, res) => {
+  ensureLiveGameStateCurrent();
+  if (!liveGameState.active) {
+    return res.json({ ok: true, liveGame: getLiveGamePayload() });
+  }
+  resetLiveGameState();
+  return res.json({ ok: true, liveGame: getLiveGamePayload() });
+});
+
+app.post("/api/admin/live-game/reset", requireAdmin, (_req, res) => {
+  if (!liveGameState.active) {
+    return res.status(409).json({ error: "No live game is running." });
+  }
+  liveGameState.scores = new Map();
+  liveGameState.startedAt = Date.now();
+  liveGameState.endsAt = liveGameState.startedAt + liveGameState.durationSeconds * 1000;
+  return res.json({ ok: true, liveGame: getLiveGamePayload() });
 });
 
 app.post("/api/admin/set-banner", requireAdmin, (req, res) => {

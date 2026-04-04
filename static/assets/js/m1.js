@@ -14,16 +14,21 @@ try {
 document.addEventListener("DOMContentLoaded", () => {
   const CHAT_COLLAPSED_KEY = "proxyChatCollapsed";
   const CHAT_POSITION_KEY = "proxyChatPosition";
+  const LIVE_GAME_SESSION_KEY = "liveGameSessionId";
   let hasLoadedEffects = false;
   let lastConfettiVersion = 0;
   let lastJumpscareVersion = 0;
   let lastClientRefreshVersion = 0;
+  let lastLiveGameSessionId = 0;
   let confettiIntervalId = null;
   let dismissedPopupVersion = null;
   let weatherFlashIntervalId = null;
   let weatherCurrentEffect = "";
   let chatPollIntervalId = null;
   let lastRenderedChatMessageId = 0;
+  let liveGameJoinInFlight = false;
+  let liveGameTapInFlight = false;
+  let liveGameLocalScore = 0;
 
   function randomBetween(min, max) {
     return min + Math.random() * (max - min);
@@ -46,6 +51,10 @@ document.addEventListener("DOMContentLoaded", () => {
     return String(localStorage.getItem("proxyChatName") || "").trim();
   }
 
+  function getLiveGamePlayerName() {
+    return getSavedChatName() || `Player ${String(getChatVisitorId()).slice(-4)}`;
+  }
+
   function sanitizeLocalChatName(value) {
     return String(value || "")
       .replace(/\s+/g, " ")
@@ -60,6 +69,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     status.textContent = message;
     status.classList.toggle("error", isError);
+  }
+
+  function getSavedLiveGameSessionId() {
+    return Number(sessionStorage.getItem(LIVE_GAME_SESSION_KEY) || "0");
+  }
+
+  function setSavedLiveGameSessionId(sessionId) {
+    sessionStorage.setItem(LIVE_GAME_SESSION_KEY, String(sessionId || 0));
   }
 
   function updateChatComposerState() {
@@ -427,6 +444,188 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function hideLiveGameOverlay() {
+    document.getElementById("admin-live-game-overlay")?.remove();
+  }
+
+  function ensureLiveGameOverlay() {
+    let overlay = document.getElementById("admin-live-game-overlay");
+    if (overlay) {
+      return overlay;
+    }
+
+    overlay = document.createElement("section");
+    overlay.id = "admin-live-game-overlay";
+    overlay.innerHTML = `
+      <div id="admin-live-game-card">
+        <div id="admin-live-game-topline">
+          <div>
+            <div id="admin-live-game-kicker">Live Game</div>
+            <h2 id="admin-live-game-title">Tap Rush</h2>
+          </div>
+          <div id="admin-live-game-timer">0s</div>
+        </div>
+        <div id="admin-live-game-meta">
+          <div id="admin-live-game-player">Joining...</div>
+          <div id="admin-live-game-score">Score: 0</div>
+        </div>
+        <button id="admin-live-game-tap" type="button">Tap!</button>
+        <div id="admin-live-game-status"></div>
+        <div id="admin-live-game-leaderboard-title">Leaderboard</div>
+        <div id="admin-live-game-leaderboard"></div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("admin-live-game-tap")?.addEventListener("click", submitLiveGameTap);
+    return overlay;
+  }
+
+  function renderLiveGameLeaderboard(entries) {
+    const leaderboard = document.getElementById("admin-live-game-leaderboard");
+    if (!leaderboard) {
+      return;
+    }
+
+    leaderboard.replaceChildren();
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "admin-live-game-empty";
+      empty.textContent = "No scores yet. Be the first to tap.";
+      leaderboard.appendChild(empty);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const [index, entry] of entries.entries()) {
+      const row = document.createElement("div");
+      row.className = "admin-live-game-entry";
+      if (entry.visitorId === getChatVisitorId()) {
+        row.classList.add("own");
+      }
+      row.innerHTML = `
+        <span class="admin-live-game-rank">#${index + 1}</span>
+        <span class="admin-live-game-name">${entry.name || "Player"}</span>
+        <span class="admin-live-game-points">${entry.score || 0}</span>
+      `;
+      fragment.appendChild(row);
+    }
+
+    leaderboard.appendChild(fragment);
+  }
+
+  function renderLiveGameState(gameState) {
+    if (!gameState?.active) {
+      hideLiveGameOverlay();
+      setSavedLiveGameSessionId(0);
+      lastLiveGameSessionId = Number(gameState?.sessionId) || lastLiveGameSessionId;
+      return;
+    }
+
+    const overlay = ensureLiveGameOverlay();
+    const title = document.getElementById("admin-live-game-title");
+    const timer = document.getElementById("admin-live-game-timer");
+    const player = document.getElementById("admin-live-game-player");
+    const score = document.getElementById("admin-live-game-score");
+    const status = document.getElementById("admin-live-game-status");
+    const tapButton = document.getElementById("admin-live-game-tap");
+
+    if (title) {
+      title.textContent = gameState.title || "Tap Rush";
+    }
+
+    const remainingMs = Math.max(0, Number(gameState.endsAt || 0) - Date.now());
+    if (timer) {
+      timer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
+    }
+
+    if (player) {
+      player.textContent = `Playing as ${getLiveGamePlayerName()}`;
+    }
+
+    if (score) {
+      score.textContent = `Score: ${liveGameLocalScore}`;
+    }
+
+    if (status) {
+      status.textContent = remainingMs > 0 ? `Players: ${gameState.totalPlayers || 0}` : "Final scores";
+    }
+
+    if (tapButton) {
+      tapButton.textContent = gameState.buttonLabel || "Tap!";
+      tapButton.disabled = liveGameTapInFlight || remainingMs <= 0;
+    }
+
+    overlay.classList.toggle("finished", remainingMs <= 0);
+    renderLiveGameLeaderboard(gameState.leaderboard || []);
+  }
+
+  async function joinLiveGame(gameState) {
+    if (!gameState?.active || liveGameJoinInFlight) {
+      return;
+    }
+    const currentSessionId = Number(gameState.sessionId) || 0;
+    if (!currentSessionId || getSavedLiveGameSessionId() === currentSessionId) {
+      return;
+    }
+
+    liveGameJoinInFlight = true;
+    try {
+      const res = await fetch("/api/live-game/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitorId: getChatVisitorId(),
+          name: getLiveGamePlayerName(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return;
+      }
+      setSavedLiveGameSessionId(currentSessionId);
+      lastLiveGameSessionId = currentSessionId;
+      liveGameLocalScore = Number(data?.player?.score) || 0;
+      renderLiveGameState(data?.liveGame || gameState);
+    } catch {
+      // Ignore transient live game join errors silently.
+    } finally {
+      liveGameJoinInFlight = false;
+    }
+  }
+
+  async function submitLiveGameTap() {
+    const sessionId = getSavedLiveGameSessionId();
+    if (!sessionId || liveGameTapInFlight) {
+      return;
+    }
+
+    liveGameTapInFlight = true;
+    try {
+      const res = await fetch("/api/live-game/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitorId: getChatVisitorId(),
+          name: getLiveGamePlayerName(),
+          increment: 1,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return;
+      }
+      liveGameLocalScore = Number(data?.player?.score) || liveGameLocalScore;
+      renderLiveGameState(data?.liveGame || null);
+    } catch {
+      // Ignore transient scoring errors silently.
+    } finally {
+      liveGameTapInFlight = false;
+    }
+  }
+
   function normalizeProxyHijackUrl(value) {
     const trimmed = String(value || "").trim();
     if (!trimmed) {
@@ -687,6 +886,126 @@ document.addEventListener("DOMContentLoaded", () => {
         margin: 0;
         line-height: 1.55;
         color: rgba(243,255,253,.86);
+      }
+      #admin-live-game-overlay {
+        position: fixed;
+        inset: auto 20px 20px auto;
+        z-index: 9650;
+        width: min(360px, calc(100vw - 32px));
+        pointer-events: none;
+      }
+      #admin-live-game-card {
+        pointer-events: auto;
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,.2);
+        background: linear-gradient(145deg, rgba(9, 36, 55, .94), rgba(16, 88, 123, .88));
+        box-shadow: 0 24px 54px rgba(0,0,0,.36);
+        padding: 18px;
+        color: #f3fffd;
+      }
+      #admin-live-game-topline,
+      #admin-live-game-meta,
+      .admin-live-game-entry {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      #admin-live-game-kicker {
+        font-size: 11px;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: rgba(243,255,253,.68);
+      }
+      #admin-live-game-title {
+        margin: 4px 0 0;
+        font-size: clamp(1.2rem, 3vw, 1.6rem);
+      }
+      #admin-live-game-timer {
+        font: 700 1.2rem/1 monospace;
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.12);
+      }
+      #admin-live-game-meta {
+        margin-top: 14px;
+        font-size: 13px;
+        color: rgba(243,255,253,.82);
+      }
+      #admin-live-game-tap {
+        width: 100%;
+        margin-top: 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.2);
+        padding: 16px 18px;
+        background: linear-gradient(145deg, rgba(94, 239, 201, .28), rgba(25, 176, 197, .24));
+        color: #f3fffd;
+        font: 700 1.1rem/1.1 inherit;
+        cursor: pointer;
+      }
+      #admin-live-game-tap:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+      }
+      #admin-live-game-status {
+        margin-top: 10px;
+        min-height: 16px;
+        font-size: 12px;
+        color: rgba(243,255,253,.72);
+      }
+      #admin-live-game-leaderboard-title {
+        margin-top: 14px;
+        font-size: 12px;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: rgba(243,255,253,.66);
+      }
+      #admin-live-game-leaderboard {
+        display: grid;
+        gap: 7px;
+        margin-top: 10px;
+      }
+      .admin-live-game-entry {
+        border-radius: 12px;
+        background: rgba(255,255,255,.08);
+        padding: 9px 10px;
+        font-size: 13px;
+      }
+      .admin-live-game-entry.own {
+        background: rgba(91, 240, 192, .16);
+        border: 1px solid rgba(91, 240, 192, .24);
+      }
+      .admin-live-game-rank {
+        width: 30px;
+        color: rgba(243,255,253,.7);
+      }
+      .admin-live-game-name {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .admin-live-game-points {
+        font-weight: 700;
+      }
+      .admin-live-game-empty {
+        border-radius: 12px;
+        background: rgba(255,255,255,.06);
+        padding: 12px;
+        font-size: 13px;
+        color: rgba(243,255,253,.68);
+        text-align: center;
+      }
+      #admin-live-game-overlay.finished #admin-live-game-tap {
+        background: rgba(255,255,255,.08);
+      }
+      @media (max-width: 640px) {
+        #admin-live-game-overlay {
+          left: 12px;
+          right: 12px;
+          bottom: 12px;
+          width: auto;
+        }
       }
       #admin-jumpscare-overlay {
         position: fixed;
@@ -1548,6 +1867,13 @@ document.addEventListener("DOMContentLoaded", () => {
       disableWeatherOverlay();
     }
 
+    if (state.liveGame?.active) {
+      renderLiveGameState(state.liveGame);
+      joinLiveGame(state.liveGame);
+    } else {
+      renderLiveGameState(state.liveGame || null);
+    }
+
     applyProxyUrlHijack(state);
     applyTabHijack(state);
     showGlobalPopup(state);
@@ -1582,8 +1908,18 @@ document.addEventListener("DOMContentLoaded", () => {
       lastConfettiVersion = Number(state.confettiVersion) || 0;
       lastJumpscareVersion = Number(state.jumpscareVersion) || 0;
       lastClientRefreshVersion = Number(state.clientRefreshVersion) || 0;
+      lastLiveGameSessionId = Number(state.liveGame?.sessionId) || 0;
       hasLoadedEffects = true;
       return;
+    }
+
+    const currentLiveGameSessionId = Number(state.liveGame?.sessionId) || 0;
+    if (currentLiveGameSessionId !== lastLiveGameSessionId) {
+      if (!state.liveGame?.active) {
+        liveGameLocalScore = 0;
+        setSavedLiveGameSessionId(0);
+      }
+      lastLiveGameSessionId = currentLiveGameSessionId;
     }
 
     const currentConfettiVersion = Number(state.confettiVersion) || 0;

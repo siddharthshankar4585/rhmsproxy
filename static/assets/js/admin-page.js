@@ -40,6 +40,12 @@
   const clearMaintenanceBtn = document.getElementById("clear-maintenance");
   const triggerJumpscareBtn = document.getElementById("trigger-jumpscare");
   const forceClientRefreshBtn = document.getElementById("force-client-refresh");
+  const liveGameTitleInput = document.getElementById("live-game-title");
+  const liveGameButtonLabelInput = document.getElementById("live-game-button-label");
+  const liveGameDurationInput = document.getElementById("live-game-duration");
+  const startLiveGameBtn = document.getElementById("start-live-game");
+  const resetLiveGameBtn = document.getElementById("reset-live-game");
+  const endLiveGameBtn = document.getElementById("end-live-game");
   const takeoverSelect = document.getElementById("takeover-theme");
   const setTakeoverBtn = document.getElementById("set-takeover");
   const clearTakeoverBtn = document.getElementById("clear-takeover");
@@ -498,6 +504,8 @@
       `Tab Hijack: <strong>${stats.tabHijackActive ? "YES" : "NO"}</strong>`,
       `Proxy URL Hijack: <strong>${stats.proxyUrlHijackActive ? "YES" : "NO"}</strong>`,
       `Weather Effect: <strong>${stats.weatherEffect || "OFF"}</strong>`,
+      `Live Game: <strong>${stats.liveGameActive ? "ON" : "OFF"}</strong>`,
+      `Live Game Players: <strong>${stats.liveGamePlayers || 0}</strong>`,
       `Uptime: <strong>${formatUptime(stats.uptime || 0)}</strong>`,
     ].join("<br>");
   }
@@ -769,6 +777,45 @@
     refreshPreview();
   });
   forceClientRefreshBtn.addEventListener("click", () => runAction("/api/admin/force-client-refresh", "Forced refresh pushed to active clients.", "force client refresh"));
+  startLiveGameBtn.addEventListener("click", async () => {
+    const title = liveGameTitleInput.value.trim();
+    const buttonLabel = liveGameButtonLabelInput.value.trim();
+    const durationSeconds = Number(liveGameDurationInput.value);
+    const { res, data } = await api("/api/admin/live-game/start", {
+      method: "POST",
+      body: JSON.stringify({ title, buttonLabel, durationSeconds }),
+    });
+    if (!res.ok) {
+      setStatus((data && data.error) || "Failed to start live game.", true);
+      return;
+    }
+    await logSystemCommand(`start live game ${title || "Tap Rush"}`);
+    setStatus("Live game started for everyone.");
+    await loadStats();
+    refreshPreview();
+  });
+  resetLiveGameBtn.addEventListener("click", async () => {
+    const { res, data } = await api("/api/admin/live-game/reset", { method: "POST" });
+    if (!res.ok) {
+      setStatus((data && data.error) || "Failed to reset live game.", true);
+      return;
+    }
+    await logSystemCommand("reset live game scores");
+    setStatus("Live game scores reset.");
+    await loadStats();
+    refreshPreview();
+  });
+  endLiveGameBtn.addEventListener("click", async () => {
+    const { res, data } = await api("/api/admin/live-game/end", { method: "POST" });
+    if (!res.ok) {
+      setStatus((data && data.error) || "Failed to end live game.", true);
+      return;
+    }
+    await logSystemCommand("end live game");
+    setStatus("Live game ended.");
+    await loadStats();
+    refreshPreview();
+  });
   setTakeoverBtn.addEventListener("click", async () => {
     const theme = takeoverSelect.value;
     const { res, data } = await api("/api/admin/set-takeover-theme", {

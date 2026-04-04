@@ -339,6 +339,22 @@
                 <button id="trigger-jumpscare" class="danger">Trigger Jumpscare</button>
                 <button id="force-client-refresh" class="danger">Force Client Refresh</button>
             </div>
+            <section class="chat-panel">
+                <h2>Live Game</h2>
+                <div class="row">
+                    <input id="live-game-title" type="text" maxlength="80"
+                        placeholder="Game title (example: Tap Rush)" />
+                    <input id="live-game-button-label" type="text" maxlength="24"
+                        placeholder="Button label (example: Tap!)" />
+                    <input id="live-game-duration" type="number" min="10" max="300" value="45"
+                        placeholder="Duration in seconds" />
+                </div>
+                <div class="row">
+                    <button id="start-live-game">Start Live Game</button>
+                    <button id="reset-live-game">Reset Scores</button>
+                    <button id="end-live-game" class="danger">End Live Game</button>
+                </div>
+            </section>
             <div class="row">
                 <select id="takeover-theme">
                     <option value="matrix">Matrix</option>
