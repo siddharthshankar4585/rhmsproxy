@@ -519,6 +519,24 @@ document.addEventListener("DOMContentLoaded", () => {
     clearLiveGameObstacles();
   }
 
+  function armLiveGameRuntime(gameState) {
+    const sessionId = Number(gameState?.sessionId) || 0;
+    if (!sessionId || !gameState?.active) {
+      return;
+    }
+
+    ensureLiveGameRuntime(gameState);
+    if (!liveGameRuntime.joinedAt) {
+      liveGameRuntime.joinedAt = Date.now();
+    }
+    if (!liveGameRuntime.alive) {
+      liveGameRuntime.alive = true;
+    }
+    if (!liveGameRuntime.rafId) {
+      liveGameRuntime.rafId = requestAnimationFrame(tickLiveGame);
+    }
+  }
+
   function triggerLiveGameJump() {
     if (!liveGameRuntime.active || !liveGameRuntime.alive) {
       return;
@@ -807,6 +825,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const overlay = ensureLiveGameOverlay();
     ensureLiveGameRuntime(gameState);
+    armLiveGameRuntime(gameState);
     const title = document.getElementById("admin-live-game-title");
     const timer = document.getElementById("admin-live-game-timer");
     const player = document.getElementById("admin-live-game-player");
@@ -882,9 +901,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ensureLiveGameRuntime(data?.liveGame || gameState);
       liveGameRuntime.joinedAt = Date.now() - liveGameLocalSurvivalMs;
       liveGameRuntime.alive = data?.player?.alive !== false;
-      if (!liveGameRuntime.rafId) {
-        liveGameRuntime.rafId = requestAnimationFrame(tickLiveGame);
-      }
+      armLiveGameRuntime(data?.liveGame || gameState);
       renderLiveGameState(data?.liveGame || gameState);
     } catch {
       // Ignore transient live game join errors silently.
@@ -2309,6 +2326,7 @@ document.addEventListener("DOMContentLoaded", () => {
         setSavedLiveGameSessionId(0);
       } else {
         resetLiveGameRuntime(currentLiveGameSessionId);
+        armLiveGameRuntime(state.liveGame);
       }
       lastLiveGameSessionId = currentLiveGameSessionId;
     }
