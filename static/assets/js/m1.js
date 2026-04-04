@@ -644,6 +644,7 @@ document.addEventListener("DOMContentLoaded", () => {
       obstacle.element.style.transform = `translateX(${obstacle.x}px)`;
       obstacle.element.style.height = `${obstacle.height}px`;
       obstacle.element.style.width = `${obstacle.width}px`;
+      obstacle.element.style.bottom = `${obstacle.bottom}px`;
     }
     overlay?.classList.toggle("finished", !liveGameRuntime.alive);
   }
@@ -685,6 +686,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function createLiveGameObstacle(obstacleLayer, stageWidth, config) {
+    const obstacle = document.createElement("div");
+    obstacle.className = `admin-live-game-obstacle ${config.className || ""}`.trim();
+    obstacleLayer.appendChild(obstacle);
+
+    liveGameRuntime.obstacles.push({
+      x: stageWidth + (config.offsetX || 24),
+      width: config.width,
+      height: config.height,
+      bottom: config.bottom ?? 22,
+      hitHeight: config.hitHeight ?? config.height,
+      element: obstacle,
+    });
+  }
+
   function spawnLiveGameObstacle() {
     const obstacleLayer = document.getElementById("admin-live-game-obstacles");
     const stage = document.getElementById("admin-live-game-stage");
@@ -692,15 +708,54 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const obstacle = document.createElement("div");
-    obstacle.className = "admin-live-game-obstacle";
-    obstacleLayer.appendChild(obstacle);
+    const stageWidth = stage.clientWidth;
+    const elapsedMs = liveGameLocalSurvivalMs;
+    const patternRoll = nextLiveGameRandom();
 
-    liveGameRuntime.obstacles.push({
-      x: stage.clientWidth + 24,
-      width: 24 + Math.round(nextLiveGameRandom() * 18),
-      height: 30 + Math.round(nextLiveGameRandom() * 42),
-      element: obstacle,
+    if (elapsedMs > 12000 && patternRoll > 0.74) {
+      const firstWidth = 18 + Math.round(nextLiveGameRandom() * 8);
+      const secondWidth = 18 + Math.round(nextLiveGameRandom() * 10);
+      createLiveGameObstacle(obstacleLayer, stageWidth, {
+        className: "spike",
+        width: firstWidth,
+        height: 18 + Math.round(nextLiveGameRandom() * 6),
+        hitHeight: 16,
+      });
+      createLiveGameObstacle(obstacleLayer, stageWidth, {
+        className: "spike alt",
+        offsetX: 56 + Math.round(nextLiveGameRandom() * 18),
+        width: secondWidth,
+        height: 18 + Math.round(nextLiveGameRandom() * 8),
+        hitHeight: 16,
+      });
+      return;
+    }
+
+    if (elapsedMs > 18000 && patternRoll > 0.5) {
+      createLiveGameObstacle(obstacleLayer, stageWidth, {
+        className: "tall",
+        width: 24 + Math.round(nextLiveGameRandom() * 10),
+        height: 58 + Math.round(nextLiveGameRandom() * 18),
+        hitHeight: 54,
+      });
+      return;
+    }
+
+    if (patternRoll > 0.26) {
+      createLiveGameObstacle(obstacleLayer, stageWidth, {
+        className: "block",
+        width: 28 + Math.round(nextLiveGameRandom() * 20),
+        height: 28 + Math.round(nextLiveGameRandom() * 16),
+        hitHeight: 24 + Math.round(nextLiveGameRandom() * 14),
+      });
+      return;
+    }
+
+    createLiveGameObstacle(obstacleLayer, stageWidth, {
+      className: "spike",
+      width: 18 + Math.round(nextLiveGameRandom() * 10),
+      height: 18 + Math.round(nextLiveGameRandom() * 8),
+      hitHeight: 16,
     });
   }
 
@@ -730,8 +785,6 @@ document.addEventListener("DOMContentLoaded", () => {
     liveGameRuntime.lastTickAt = timestamp;
     const now = Date.now();
     const remainingMs = Math.max(0, liveGameRuntime.endsAt - now);
-    const stage = document.getElementById("admin-live-game-stage");
-    const stageWidth = stage?.clientWidth || 320;
     const runnerLeft = 42;
     const runnerWidth = 34;
     const gravity = 0.00235;
@@ -754,7 +807,7 @@ document.addEventListener("DOMContentLoaded", () => {
       liveGameRuntime.obstacles = liveGameRuntime.obstacles.filter(obstacle => {
         obstacle.x -= obstacleSpeed * dt * 60 / 16;
         const horizontalHit = obstacle.x < runnerLeft + runnerWidth && obstacle.x + obstacle.width > runnerLeft;
-        const verticalHit = liveGameRuntime.runnerY < obstacle.height - 4;
+        const verticalHit = liveGameRuntime.runnerY < (obstacle.hitHeight || obstacle.height) - 4;
         if (horizontalHit && verticalHit) {
           finishLiveGameRun();
         }
@@ -1278,6 +1331,25 @@ document.addEventListener("DOMContentLoaded", () => {
         background: linear-gradient(180deg, rgba(255, 157, 101, .96), rgba(158, 67, 38, .96));
         box-shadow: 0 10px 18px rgba(0,0,0,.22);
         will-change: transform;
+      }
+      .admin-live-game-obstacle.block {
+        border-radius: 8px 8px 3px 3px;
+        background: linear-gradient(180deg, rgba(255, 180, 112, .96), rgba(166, 83, 45, .96));
+      }
+      .admin-live-game-obstacle.tall {
+        border-radius: 10px 10px 4px 4px;
+        background: linear-gradient(180deg, rgba(255, 139, 96, .98), rgba(129, 46, 31, .98));
+        box-shadow: 0 12px 22px rgba(0,0,0,.28);
+      }
+      .admin-live-game-obstacle.spike {
+        min-height: 16px;
+        border-radius: 0;
+        background: linear-gradient(180deg, rgba(255, 226, 144, .98), rgba(224, 102, 55, .96));
+        clip-path: polygon(50% 0, 100% 100%, 0 100%);
+        box-shadow: none;
+      }
+      .admin-live-game-obstacle.spike.alt {
+        background: linear-gradient(180deg, rgba(255, 244, 184, .98), rgba(242, 123, 66, .96));
       }
       #admin-live-game-tap {
         width: 100%;
