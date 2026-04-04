@@ -889,13 +889,17 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       #admin-live-game-overlay {
         position: fixed;
-        inset: auto 20px 20px auto;
+        inset: 0;
         z-index: 9650;
-        width: min(360px, calc(100vw - 32px));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
         pointer-events: none;
       }
       #admin-live-game-card {
         pointer-events: auto;
+        width: min(420px, calc(100vw - 32px));
         border-radius: 18px;
         border: 1px solid rgba(255,255,255,.2);
         background: linear-gradient(145deg, rgba(9, 36, 55, .94), rgba(16, 88, 123, .88));
@@ -1001,10 +1005,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       @media (max-width: 640px) {
         #admin-live-game-overlay {
-          left: 12px;
-          right: 12px;
-          bottom: 12px;
-          width: auto;
+          padding: 12px;
         }
       }
       #admin-jumpscare-overlay {
@@ -1667,24 +1668,72 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function hideGlobalPopup() {
-    document.getElementById("admin-global-popup")?.remove();
+    const overlay = document.getElementById("admin-global-popup");
+    if (!overlay) {
+      return;
+    }
+    overlay.style.display = "none";
+  }
+
+  function ensureGlobalPopupOverlay() {
+    let overlay = document.getElementById("admin-global-popup");
+    if (overlay) {
+      return overlay;
+    }
+
+    overlay = document.createElement("div");
+    overlay.id = "admin-global-popup";
+    overlay.innerHTML = `
+      <div id="admin-global-popup-card">
+        <h2></h2>
+        <p></p>
+        <button type="button">Close</button>
+      </div>
+    `;
+
+    const button = overlay.querySelector("button");
+    button.addEventListener("click", () => {
+      dismissedPopupVersion = Number(overlay.dataset.popupVersion || "0") || dismissedPopupVersion;
+      hideGlobalPopup();
+    });
+
+    document.body.appendChild(overlay);
+    return overlay;
   }
 
   function hideMaintenanceOverlay() {
-    document.getElementById("admin-maintenance-overlay")?.remove();
+    const overlay = document.getElementById("admin-maintenance-overlay");
+    if (!overlay) {
+      return;
+    }
+    overlay.style.display = "none";
   }
 
-  function showMaintenanceOverlay(message) {
-    hideMaintenanceOverlay();
-    const overlay = document.createElement("div");
+  function ensureMaintenanceOverlay() {
+    let overlay = document.getElementById("admin-maintenance-overlay");
+    if (overlay) {
+      return overlay;
+    }
+
+    overlay = document.createElement("div");
     overlay.id = "admin-maintenance-overlay";
     overlay.innerHTML = `
       <div id="admin-maintenance-card">
         <h2>Maintenance Mode</h2>
-        <p>${message || "Maintenance in progress. Please check back soon."}</p>
+        <p></p>
       </div>
     `;
     document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  function showMaintenanceOverlay(message) {
+    const overlay = ensureMaintenanceOverlay();
+    const copy = overlay.querySelector("p");
+    if (copy) {
+      copy.textContent = message || "Maintenance in progress. Please check back soon.";
+    }
+    overlay.style.display = "flex";
   }
 
   function ensureJumpscareOverlay() {
@@ -1802,25 +1851,22 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    hideGlobalPopup();
+    const overlay = ensureGlobalPopupOverlay();
+    overlay.dataset.popupVersion = String(popupVersion);
 
-    const overlay = document.createElement("div");
-    overlay.id = "admin-global-popup";
-    overlay.innerHTML = `
-      <div id="admin-global-popup-card">
-        <h2>${state.popupTitle || "Message"}</h2>
-        <p>${state.popupMessage || ""}</p>
-        <button type="button">${state.popupButtonText || "Close"}</button>
-      </div>
-    `;
-
+    const heading = overlay.querySelector("h2");
+    const copy = overlay.querySelector("p");
     const button = overlay.querySelector("button");
-    button.addEventListener("click", () => {
-      dismissedPopupVersion = popupVersion;
-      hideGlobalPopup();
-    });
-
-    document.body.appendChild(overlay);
+    if (heading) {
+      heading.textContent = state.popupTitle || "Message";
+    }
+    if (copy) {
+      copy.textContent = state.popupMessage || "";
+    }
+    if (button) {
+      button.textContent = state.popupButtonText || "Close";
+    }
+    overlay.style.display = "flex";
   }
 
   function enableMatrixOverlay() {
