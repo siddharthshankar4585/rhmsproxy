@@ -21,6 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let hasLoadedEffects = false;
   let lastConfettiVersion = 0;
   let lastJumpscareVersion = 0;
+  let lastVoiceBlastVersion = 0;
   let lastClientRefreshVersion = 0;
   let lastLiveGameSessionId = 0;
   let lastAcceptedEffectsRevision = Number(sessionStorage.getItem(EFFECTS_REVISION_KEY) || "0");
@@ -769,6 +770,29 @@ document.addEventListener("DOMContentLoaded", () => {
     if (status) {
       status.textContent = `Crashed at ${formatLiveGameDuration(liveGameLocalSurvivalMs)}. Wait for the next round or reset.`;
     }
+  }
+
+  function triggerAdminVoiceBlast(message) {
+    const text = String(message || "").trim();
+    if (!text || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(voice => /en(-|_)?/i.test(voice.lang) && /google|microsoft|natural|online/i.test(voice.name))
+      || voices.find(voice => /en(-|_)?/i.test(voice.lang))
+      || voices[0];
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
   }
 
   function tickLiveGame(timestamp) {
@@ -2382,6 +2406,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!hasLoadedEffects) {
       lastConfettiVersion = Number(state.confettiVersion) || 0;
       lastJumpscareVersion = Number(state.jumpscareVersion) || 0;
+      lastVoiceBlastVersion = Number(state.voiceBlastVersion) || 0;
       lastClientRefreshVersion = Number(state.clientRefreshVersion) || 0;
       lastLiveGameSessionId = Number(state.liveGame?.sessionId) || 0;
       hasLoadedEffects = true;
@@ -2411,6 +2436,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (currentJumpscareVersion > lastJumpscareVersion) {
       triggerAdminJumpscare();
       lastJumpscareVersion = currentJumpscareVersion;
+    }
+
+    const currentVoiceBlastVersion = Number(state.voiceBlastVersion) || 0;
+    if (currentVoiceBlastVersion > lastVoiceBlastVersion) {
+      triggerAdminVoiceBlast(state.voiceBlastText);
+      lastVoiceBlastVersion = currentVoiceBlastVersion;
     }
 
     const currentClientRefreshVersion = Number(state.clientRefreshVersion) || 0;

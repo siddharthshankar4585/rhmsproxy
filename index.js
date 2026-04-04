@@ -54,6 +54,8 @@ const siteEffects = {
   popupButtonText: "Close",
   popupVersion: 0,
   jumpscareVersion: 0,
+  voiceBlastText: "",
+  voiceBlastVersion: 0,
   maintenanceMode: false,
   maintenanceMessage: DEFAULT_MAINTENANCE_MESSAGE,
   clientRefreshVersion: 0,
@@ -638,6 +640,8 @@ app.get("/api/admin/public-state", (_req, res) => {
     popupButtonText: siteEffects.popupButtonText,
     popupVersion: siteEffects.popupVersion,
     jumpscareVersion: siteEffects.jumpscareVersion,
+    voiceBlastText: siteEffects.voiceBlastText,
+    voiceBlastVersion: siteEffects.voiceBlastVersion,
     maintenanceMode: siteEffects.maintenanceMode,
     maintenanceMessage: siteEffects.maintenanceMessage,
     clientRefreshVersion: siteEffects.clientRefreshVersion,
@@ -905,6 +909,25 @@ app.post("/api/admin/trigger-jumpscare", requireAdmin, (_req, res) => {
   markSiteEffectsUpdated();
   siteEffects.jumpscareVersion += 1;
   return res.json({ ok: true, jumpscareVersion: siteEffects.jumpscareVersion });
+});
+
+app.post("/api/admin/trigger-voice-blast", requireAdmin, (req, res) => {
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  if (!message) {
+    return res.status(400).json({ error: "Voice message is required" });
+  }
+  if (message.length > 240) {
+    return res.status(400).json({ error: "Voice message too long (max 240 chars)" });
+  }
+
+  markSiteEffectsUpdated();
+  siteEffects.voiceBlastText = message;
+  siteEffects.voiceBlastVersion += 1;
+  return res.json({
+    ok: true,
+    voiceBlastText: siteEffects.voiceBlastText,
+    voiceBlastVersion: siteEffects.voiceBlastVersion,
+  });
 });
 
 app.post("/api/admin/set-tab-hijack", requireAdmin, (req, res) => {

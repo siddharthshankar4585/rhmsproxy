@@ -39,6 +39,8 @@
   const setMaintenanceBtn = document.getElementById("set-maintenance");
   const clearMaintenanceBtn = document.getElementById("clear-maintenance");
   const triggerJumpscareBtn = document.getElementById("trigger-jumpscare");
+  const voiceBlastMessageInput = document.getElementById("voice-blast-message");
+  const triggerVoiceBlastBtn = document.getElementById("trigger-voice-blast");
   const forceClientRefreshBtn = document.getElementById("force-client-refresh");
   const liveGameTitleInput = document.getElementById("live-game-title");
   const liveGameButtonLabelInput = document.getElementById("live-game-button-label");
@@ -773,6 +775,33 @@
     await logSystemCommand("trigger jumpscare");
     previewAdminJumpscare();
     setStatus("Jumpscare sent to all active users.");
+    await loadStats();
+    refreshPreview();
+  });
+  triggerVoiceBlastBtn.addEventListener("click", async () => {
+    const message = voiceBlastMessageInput.value.trim();
+    if (!message) {
+      setStatus("Enter a voice message first.", true);
+      return;
+    }
+
+    const { res, data } = await api("/api/admin/trigger-voice-blast", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+    if (res.status === 401) {
+      clearToken();
+      showLogin();
+      setStatus("Session expired. Log in again.", true);
+      return;
+    }
+    if (!res.ok) {
+      setStatus((data && data.error) || "Failed to trigger voice blast.", true);
+      return;
+    }
+
+    await logSystemCommand(`voice blast ${message}`);
+    setStatus("Voice blast sent to all active users.");
     await loadStats();
     refreshPreview();
   });
