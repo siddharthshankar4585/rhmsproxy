@@ -35,6 +35,10 @@ document.addEventListener("DOMContentLoaded", () => {
   let liveGameSyncInFlight = false;
   let liveGameLocalSurvivalMs = 0;
   let activeConfettiPieces = 0;
+  let voiceBlastAudioContext = null;
+  let voiceBlastAudioUnlocked = false;
+  let voiceBlastPendingPayload = null;
+  let voiceBlastSourceNode = null;
   const liveGameRuntime = {
     sessionId: 0,
     active: false,
@@ -772,8 +776,43 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function triggerAdminVoiceBlast(message) {
-    const text = String(message || "").trim();
+  function ensureVoiceBlastAudioContext() {
+    if (voiceBlastAudioContext) {
+      return voiceBlastAudioContext;
+    }
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      return null;
+    }
+
+    voiceBlastAudioContext = new AudioCtx();
+    voiceBlastAudioUnlocked = voiceBlastAudioContext.state === "running";
+    return voiceBlastAudioContext;
+  }
+
+  async function unlockVoiceBlastAudio() {
+    const audioContext = ensureVoiceBlastAudioContext();
+    if (!audioContext) {
+      return;
+    }
+
+    try {
+      if (audioContext.state !== "running") {
+        await audioContext.resume();
+      }
+      voiceBlastAudioUnlocked = audioContext.state === "running";
+      if (voiceBlastAudioUnlocked && voiceBlastPendingPayload) {
+        const pendingPayload = voiceBlastPendingPayload;
+        voiceBlastPendingPayload = null;
+        triggerAdminVoiceBlast(pendingPayload.message, pendingPayload.version);
+      }
+    } catch {
+      // Ignore audio unlock failures until the next user interaction.
+    }
+  }
+
+  function fallbackAdminVoiceBlast(text) {
     if (!text || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
       return;
     }
@@ -793,6 +832,52 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
+  }
+
+  async function triggerAdminVoiceBlast(message, version = 0) {
+    const text = String(message || "").trim();
+    if (!text) {
+      return;
+    }
+
+    const audioContext = ensureVoiceBlastAudioContext();
+    if (!audioContext || !voiceBlastAudioUnlocked) {
+      voiceBlastPendingPayload = { message: text, version };
+      fallbackAdminVoiceBlast(text);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/voice-blast-audio?version=${encodeURIComponent(String(version || 0))}&text=${encodeURIComponent(text)}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        fallbackAdminVoiceBlast(text);
+        return;
+      }
+
+      const audioBuffer = await audioContext.decodeAudioData(await res.arrayBuffer());
+      if (voiceBlastSourceNode) {
+        try {
+          voiceBlastSourceNode.stop();
+        } catch {
+          // Ignore if the previous source already ended.
+        }
+      }
+
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      source.onended = () => {
+        if (voiceBlastSourceNode === source) {
+          voiceBlastSourceNode = null;
+        }
+      };
+      voiceBlastSourceNode = source;
+      source.start();
+    } catch {
+      fallbackAdminVoiceBlast(text);
+    }
   }
 
   function tickLiveGame(timestamp) {
@@ -2440,7 +2525,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const currentVoiceBlastVersion = Number(state.voiceBlastVersion) || 0;
     if (currentVoiceBlastVersion > lastVoiceBlastVersion) {
-      triggerAdminVoiceBlast(state.voiceBlastText);
+      triggerAdminVoiceBlast(state.voiceBlastText, currentVoiceBlastVersion);
       lastVoiceBlastVersion = currentVoiceBlastVersion;
     }
 
@@ -2768,6 +2853,9 @@ document.addEventListener("DOMContentLoaded", () => {
       applyChatPosition();
     }
   });
+
+  document.addEventListener("pointerdown", unlockVoiceBlastAudio, { passive: true });
+  document.addEventListener("keydown", unlockVoiceBlastAudio);
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {

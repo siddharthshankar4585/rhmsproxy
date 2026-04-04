@@ -42,6 +42,8 @@ const adminLoginAttempts = new Map(); // ip -> { count, lockedUntil }
 const DEFAULT_MAINTENANCE_MESSAGE = "Maintenance in progress. Please check back soon.";
 const LIVE_GAME_DEFAULT_DURATION_SECONDS = 45;
 const LIVE_GAME_MAX_DURATION_SECONDS = 300;
+const VOICE_BLAST_MAX_LENGTH = 240;
+const VOICE_BLAST_DEFAULT_VOICE = process.env.VOICE_BLAST_VOICE || "Brian";
 const siteEffects = {
   effectsRevision: 1,
   bannerText: "",
@@ -211,6 +213,49 @@ function clearExclusiveEffects() {
 
 function markSiteEffectsUpdated() {
   siteEffects.effectsRevision += 1;
+}
+
+async function fetchVoiceBlastAudioBuffer(text) {
+  const safeText = String(text || "").trim();
+  const providers = [
+    {
+      url: `https://api.streamelements.com/kappa/v2/speech?${new URLSearchParams({
+        voice: VOICE_BLAST_DEFAULT_VOICE,
+        text: safeText,
+      }).toString()}`,
+      headers: { Accept: "audio/mpeg" },
+    },
+    {
+      url: `https://translate.google.com/translate_tts?${new URLSearchParams({
+        ie: "UTF-8",
+        tl: "en",
+        client: "tw-ob",
+        q: safeText,
+      }).toString()}`,
+      headers: {
+        Accept: "audio/mpeg",
+        "User-Agent": "Mozilla/5.0",
+      },
+    },
+  ];
+
+  for (const provider of providers) {
+    try {
+      const response = await fetch(provider.url, { headers: provider.headers });
+      if (!response.ok) {
+        continue;
+      }
+
+      return {
+        buffer: Buffer.from(await response.arrayBuffer()),
+        contentType: response.headers.get("content-type") || "audio/mpeg",
+      };
+    } catch {
+      // Try the next provider.
+    }
+  }
+
+  return null;
 }
 
 function todayKey() {
@@ -916,8 +961,8 @@ app.post("/api/admin/trigger-voice-blast", requireAdmin, (req, res) => {
   if (!message) {
     return res.status(400).json({ error: "Voice message is required" });
   }
-  if (message.length > 240) {
-    return res.status(400).json({ error: "Voice message too long (max 240 chars)" });
+  if (message.length > VOICE_BLAST_MAX_LENGTH) {
+    return res.status(400).json({ error: `Voice message too long (max ${VOICE_BLAST_MAX_LENGTH} chars)` });
   }
 
   markSiteEffectsUpdated();
@@ -928,6 +973,27 @@ app.post("/api/admin/trigger-voice-blast", requireAdmin, (req, res) => {
     voiceBlastText: siteEffects.voiceBlastText,
     voiceBlastVersion: siteEffects.voiceBlastVersion,
   });
+});
+
+app.get("/api/admin/voice-blast-audio", async (req, res) => {
+  const text = typeof req.query?.text === "string" ? req.query.text.trim() : "";
+  if (!text) {
+    return res.status(400).send("Missing voice text.");
+  }
+  if (text.length > VOICE_BLAST_MAX_LENGTH) {
+    return res.status(400).send("Voice text too long.");
+  }
+
+  const audio = await fetchVoiceBlastAudioBuffer(text);
+  if (!audio) {
+    return res.status(502).send("Voice generation unavailable.");
+  }
+
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Content-Type", audio.contentType);
+  return res.send(audio.buffer);
 });
 
 app.post("/api/admin/set-tab-hijack", requireAdmin, (req, res) => {
