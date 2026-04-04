@@ -12,6 +12,8 @@ try {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  const CHAT_COLLAPSED_KEY = "proxyChatCollapsed";
+  const CHAT_POSITION_KEY = "proxyChatPosition";
   let hasLoadedEffects = false;
   let lastConfettiVersion = 0;
   let lastJumpscareVersion = 0;
@@ -243,6 +245,127 @@ document.addEventListener("DOMContentLoaded", () => {
     setChatStatus(`Joined chat as ${name}.`);
   }
 
+  function getChatWidget() {
+    return document.getElementById("proxy-chat-widget");
+  }
+
+  function isChatCollapsed() {
+    return localStorage.getItem(CHAT_COLLAPSED_KEY) === "true";
+  }
+
+  function setChatCollapsed(collapsed) {
+    localStorage.setItem(CHAT_COLLAPSED_KEY, collapsed ? "true" : "false");
+    const widget = getChatWidget();
+    if (!widget) {
+      return;
+    }
+    const toggle = document.getElementById("proxy-chat-toggle");
+    widget.classList.toggle("collapsed", collapsed);
+    if (toggle) {
+      toggle.textContent = collapsed ? "+" : "-";
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      toggle.setAttribute("title", collapsed ? "Expand chat" : "Collapse chat");
+    }
+  }
+
+  function getSavedChatPosition() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(CHAT_POSITION_KEY) || "null");
+      if (!parsed || !Number.isFinite(parsed.left) || !Number.isFinite(parsed.top)) {
+        return null;
+      }
+      return { left: parsed.left, top: parsed.top };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveChatPosition(left, top) {
+    localStorage.setItem(CHAT_POSITION_KEY, JSON.stringify({ left, top }));
+  }
+
+  function clampChatPosition(left, top, widget) {
+    const safeLeft = Math.max(8, Math.min(left, window.innerWidth - widget.offsetWidth - 8));
+    const safeTop = Math.max(8, Math.min(top, window.innerHeight - widget.offsetHeight - 8));
+    return { left: safeLeft, top: safeTop };
+  }
+
+  function applyChatPosition(position = getSavedChatPosition()) {
+    const widget = getChatWidget();
+    if (!widget) {
+      return;
+    }
+    if (!position) {
+      widget.style.left = "16px";
+      widget.style.top = "";
+      widget.style.bottom = window.innerWidth <= 640 ? "108px" : "16px";
+      widget.style.right = window.innerWidth <= 640 ? "12px" : "";
+      return;
+    }
+
+    const clamped = clampChatPosition(position.left, position.top, widget);
+    widget.style.left = `${clamped.left}px`;
+    widget.style.top = `${clamped.top}px`;
+    widget.style.bottom = "auto";
+    widget.style.right = "auto";
+    saveChatPosition(clamped.left, clamped.top);
+  }
+
+  function enableChatDragging() {
+    const widget = getChatWidget();
+    const header = document.getElementById("proxy-chat-header");
+    if (!widget || !header || header.dataset.dragBound === "true") {
+      return;
+    }
+
+    let dragState = null;
+
+    header.addEventListener("pointerdown", event => {
+      if (event.button !== 0) {
+        return;
+      }
+      if (event.target instanceof Element && event.target.closest("button")) {
+        return;
+      }
+
+      const rect = widget.getBoundingClientRect();
+      dragState = {
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+      };
+
+      widget.classList.add("dragging");
+      header.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+
+    header.addEventListener("pointermove", event => {
+      if (!dragState) {
+        return;
+      }
+      const nextLeft = event.clientX - dragState.offsetX;
+      const nextTop = event.clientY - dragState.offsetY;
+      const clamped = clampChatPosition(nextLeft, nextTop, widget);
+      widget.style.left = `${clamped.left}px`;
+      widget.style.top = `${clamped.top}px`;
+      widget.style.bottom = "auto";
+      widget.style.right = "auto";
+    });
+
+    function finishDrag() {
+      if (!dragState) {
+        return;
+      }
+      dragState = null;
+      widget.classList.remove("dragging");
+      saveChatPosition(parseFloat(widget.style.left) || 16, parseFloat(widget.style.top) || 16);
+    }
+
+    header.addEventListener("pointerup", finishDrag);
+    header.addEventListener("pointercancel", finishDrag);
+    header.dataset.dragBound = "true";
+  }
+
   function mountChatWidget() {
     if (document.getElementById("proxy-chat-widget")) {
       updateChatComposerState();
@@ -253,8 +376,11 @@ document.addEventListener("DOMContentLoaded", () => {
     widget.id = "proxy-chat-widget";
     widget.innerHTML = `
       <div id="proxy-chat-header">
-        <div id="proxy-chat-title">Proxy Chat</div>
-        <div id="proxy-chat-name-badge"></div>
+        <div id="proxy-chat-title-wrap">
+          <div id="proxy-chat-title">Proxy Chat</div>
+          <div id="proxy-chat-name-badge"></div>
+        </div>
+        <button id="proxy-chat-toggle" type="button" aria-expanded="true" title="Collapse chat">-</button>
       </div>
       <div id="proxy-chat-body">
         <div id="proxy-chat-name-row">
@@ -272,6 +398,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.body.appendChild(widget);
 
+    document.getElementById("proxy-chat-toggle")?.addEventListener("click", event => {
+      event.stopPropagation();
+      setChatCollapsed(!isChatCollapsed());
+    });
+
     document.getElementById("proxy-chat-save-name")?.addEventListener("click", saveChatName);
     document.getElementById("proxy-chat-send")?.addEventListener("click", sendChatMessage);
     document.getElementById("proxy-chat-name-input")?.addEventListener("keydown", event => {
@@ -284,6 +415,10 @@ document.addEventListener("DOMContentLoaded", () => {
         sendChatMessage();
       }
     });
+
+    enableChatDragging();
+    setChatCollapsed(isChatCollapsed());
+    applyChatPosition();
 
     updateChatComposerState();
     fetchChatMessages();
@@ -653,6 +788,15 @@ document.addEventListener("DOMContentLoaded", () => {
         padding: 10px 12px;
         background: rgba(255,255,255,.06);
         border-bottom: 1px solid rgba(255,255,255,.12);
+        cursor: grab;
+        touch-action: none;
+      }
+      #proxy-chat-widget.dragging #proxy-chat-header {
+        cursor: grabbing;
+      }
+      #proxy-chat-title-wrap {
+        min-width: 0;
+        flex: 1 1 auto;
       }
       #proxy-chat-title {
         font: 700 14px/1.2 inherit;
@@ -670,10 +814,25 @@ document.addEventListener("DOMContentLoaded", () => {
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      #proxy-chat-toggle {
+        flex: 0 0 34px !important;
+        width: 34px !important;
+        min-width: 34px;
+        padding: 7px 0 !important;
+        border-radius: 9px;
+        font-size: 18px;
+        line-height: 1;
+      }
       #proxy-chat-body {
         display: grid;
         gap: 10px;
         padding: 12px;
+      }
+      #proxy-chat-widget.collapsed {
+        width: min(260px, calc(100vw - 32px));
+      }
+      #proxy-chat-widget.collapsed #proxy-chat-body {
+        display: none;
       }
       #proxy-chat-name-row,
       #proxy-chat-compose {
@@ -804,6 +963,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         #proxy-chat-name-badge {
           max-width: 50%;
+        }
+        #proxy-chat-widget.collapsed {
+          width: auto;
         }
         #proxy-chat-widget button,
         #proxy-chat-widget input {
@@ -1748,6 +1910,12 @@ document.addEventListener("DOMContentLoaded", () => {
   mountChatWidget();
   fetchPublicEffects();
   effectsIntervalId = setInterval(fetchPublicEffects, EFFECTS_POLL_INTERVAL_MS);
+
+  window.addEventListener("resize", () => {
+    if (getSavedChatPosition()) {
+      applyChatPosition();
+    }
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
