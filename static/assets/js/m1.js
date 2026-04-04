@@ -15,11 +15,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const CHAT_COLLAPSED_KEY = "proxyChatCollapsed";
   const CHAT_POSITION_KEY = "proxyChatPosition";
   const LIVE_GAME_SESSION_KEY = "liveGameSessionId";
+  const EFFECTS_REVISION_KEY = "adminEffectsRevision";
   let hasLoadedEffects = false;
   let lastConfettiVersion = 0;
   let lastJumpscareVersion = 0;
   let lastClientRefreshVersion = 0;
   let lastLiveGameSessionId = 0;
+  let lastAcceptedEffectsRevision = Number(sessionStorage.getItem(EFFECTS_REVISION_KEY) || "0");
   let confettiIntervalId = null;
   let dismissedPopupVersion = null;
   let weatherFlashIntervalId = null;
@@ -1895,6 +1897,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function applyPublicEffects(state) {
     ensureEffectStyles();
+    const currentLiveGameSessionId = Number(state.liveGame?.sessionId) || 0;
+    const isStaleLiveGameState = currentLiveGameSessionId < lastLiveGameSessionId;
 
     document.body.classList.remove("takeover-matrix", "takeover-emergency", "takeover-arcade", "takeover-gold");
     if (state.takeoverTheme) {
@@ -1913,7 +1917,9 @@ document.addEventListener("DOMContentLoaded", () => {
       disableWeatherOverlay();
     }
 
-    if (state.liveGame?.active) {
+    if (isStaleLiveGameState) {
+      // Keep the current overlay until a same-or-newer session snapshot arrives.
+    } else if (state.liveGame?.active) {
       renderLiveGameState(state.liveGame);
       joinLiveGame(state.liveGame);
     } else {
@@ -1959,7 +1965,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const currentLiveGameSessionId = Number(state.liveGame?.sessionId) || 0;
     if (currentLiveGameSessionId !== lastLiveGameSessionId) {
       if (!state.liveGame?.active) {
         liveGameLocalScore = 0;
@@ -1996,6 +2001,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch(`/api/admin/public-state?ts=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
+      const nextRevision = Number(data?.effectsRevision) || 0;
+      if (nextRevision < lastAcceptedEffectsRevision) {
+        return;
+      }
+      lastAcceptedEffectsRevision = nextRevision;
+      sessionStorage.setItem(EFFECTS_REVISION_KEY, String(lastAcceptedEffectsRevision));
       applyPublicEffects(data);
     } catch {
       // Ignore effect polling errors silently.

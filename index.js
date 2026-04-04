@@ -43,6 +43,7 @@ const DEFAULT_MAINTENANCE_MESSAGE = "Maintenance in progress. Please check back 
 const LIVE_GAME_DEFAULT_DURATION_SECONDS = 45;
 const LIVE_GAME_MAX_DURATION_SECONDS = 300;
 const siteEffects = {
+  effectsRevision: 1,
   bannerText: "",
   partyMode: false,
   chaosMode: false,
@@ -173,6 +174,7 @@ function upsertLiveGamePlayer(visitorId, preferredName = "") {
 }
 
 function clearExclusiveEffects() {
+  siteEffects.effectsRevision += 1;
   siteEffects.bannerText = "";
   siteEffects.partyMode = false;
   siteEffects.chaosMode = false;
@@ -187,6 +189,10 @@ function clearExclusiveEffects() {
   siteEffects.proxyUrlHijack = "";
   siteEffects.weatherEffect = "";
   resetLiveGameState();
+}
+
+function markSiteEffectsUpdated() {
+  siteEffects.effectsRevision += 1;
 }
 
 function todayKey() {
@@ -593,6 +599,7 @@ app.get("/api/admin/public-state", (_req, res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   return res.json({
+    effectsRevision: siteEffects.effectsRevision,
     bannerText: siteEffects.bannerText,
     partyMode: siteEffects.partyMode,
     chaosMode: siteEffects.chaosMode,
@@ -742,6 +749,7 @@ app.post("/api/admin/set-banner", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/clear-banner", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.bannerText = "";
   return res.json({ ok: true });
 });
@@ -780,6 +788,7 @@ app.post("/api/admin/set-takeover-theme", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/clear-takeover-theme", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.takeoverTheme = "";
   return res.json({ ok: true });
 });
@@ -818,6 +827,7 @@ app.post("/api/admin/set-popup", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/clear-popup", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.popupTitle = "";
   siteEffects.popupMessage = "";
   siteEffects.popupButtonText = "Close";
@@ -845,17 +855,20 @@ app.post("/api/admin/set-maintenance", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/clear-maintenance", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.maintenanceMode = false;
   siteEffects.maintenanceMessage = DEFAULT_MAINTENANCE_MESSAGE;
   return res.json({ ok: true, maintenanceMode: siteEffects.maintenanceMode });
 });
 
 app.post("/api/admin/force-client-refresh", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.clientRefreshVersion += 1;
   return res.json({ ok: true, clientRefreshVersion: siteEffects.clientRefreshVersion });
 });
 
 app.post("/api/admin/trigger-jumpscare", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.jumpscareVersion += 1;
   return res.json({ ok: true, jumpscareVersion: siteEffects.jumpscareVersion });
 });
@@ -886,6 +899,7 @@ app.post("/api/admin/set-tab-hijack", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/clear-tab-hijack", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.tabTitleOverride = "";
   siteEffects.tabFaviconOverride = "";
   return res.json({ ok: true });
@@ -912,6 +926,7 @@ app.post("/api/admin/set-proxy-url-hijack", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/clear-proxy-url-hijack", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.proxyUrlHijack = "";
   siteEffects.proxyUrlHijackVersion += 1;
   return res.json({ ok: true, proxyUrlHijackVersion: siteEffects.proxyUrlHijackVersion });
@@ -928,6 +943,7 @@ app.post("/api/admin/set-weather-effect", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/clear-weather-effect", requireAdmin, (_req, res) => {
+  markSiteEffectsUpdated();
   siteEffects.weatherEffect = "";
   return res.json({ ok: true });
 });
