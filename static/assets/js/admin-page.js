@@ -39,6 +39,8 @@
   const setMaintenanceBtn = document.getElementById("set-maintenance");
   const clearMaintenanceBtn = document.getElementById("clear-maintenance");
   const triggerJumpscareBtn = document.getElementById("trigger-jumpscare");
+  const inputLockDurationInput = document.getElementById("input-lock-duration");
+  const triggerInputLockBtn = document.getElementById("trigger-input-lock");
   const voiceBlastMessageInput = document.getElementById("voice-blast-message");
   const triggerVoiceBlastBtn = document.getElementById("trigger-voice-blast");
   const forceClientRefreshBtn = document.getElementById("force-client-refresh");
@@ -775,6 +777,30 @@
     await logSystemCommand("trigger jumpscare");
     previewAdminJumpscare();
     setStatus("Jumpscare sent to all active users.");
+    await loadStats();
+    refreshPreview();
+  });
+  triggerInputLockBtn.addEventListener("click", async () => {
+    const seconds = Number(inputLockDurationInput.value);
+    const durationMs = Number.isFinite(seconds) ? Math.max(1, Math.min(Math.floor(seconds), 15)) * 1000 : 5000;
+
+    const { res, data } = await api("/api/admin/trigger-input-lock", {
+      method: "POST",
+      body: JSON.stringify({ durationMs }),
+    });
+    if (res.status === 401) {
+      clearToken();
+      showLogin();
+      setStatus("Session expired. Log in again.", true);
+      return;
+    }
+    if (!res.ok) {
+      setStatus((data && data.error) || "Failed to trigger input lock.", true);
+      return;
+    }
+
+    await logSystemCommand(`input lock ${Math.floor(durationMs / 1000)}s`);
+    setStatus("Input lock sent to all active users.");
     await loadStats();
     refreshPreview();
   });

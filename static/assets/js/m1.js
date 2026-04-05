@@ -22,6 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let lastConfettiVersion = 0;
   let lastJumpscareVersion = 0;
   let lastVoiceBlastVersion = 0;
+  let lastInputLockVersion = 0;
   let lastClientRefreshVersion = 0;
   let lastLiveGameSessionId = 0;
   let lastAcceptedEffectsRevision = Number(sessionStorage.getItem(EFFECTS_REVISION_KEY) || "0");
@@ -39,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let voiceBlastAudioUnlocked = false;
   let voiceBlastPendingPayload = null;
   let voiceBlastSourceNode = null;
+  let inputLockTimeoutId = null;
   const liveGameRuntime = {
     sessionId: 0,
     active: false,
@@ -774,6 +776,37 @@ document.addEventListener("DOMContentLoaded", () => {
     if (status) {
       status.textContent = `Crashed at ${formatLiveGameDuration(liveGameLocalSurvivalMs)}. Wait for the next round or reset.`;
     }
+  }
+
+  function hideInputLockOverlay() {
+    if (inputLockTimeoutId !== null) {
+      clearTimeout(inputLockTimeoutId);
+      inputLockTimeoutId = null;
+    }
+    document.getElementById("admin-input-lock-overlay")?.remove();
+  }
+
+  function triggerInputLock(durationMs) {
+    const safeDurationMs = Number.isFinite(durationMs) ? Math.max(1000, Math.min(Math.floor(durationMs), 15000)) : 5000;
+    hideInputLockOverlay();
+
+    const overlay = document.createElement("div");
+    overlay.id = "admin-input-lock-overlay";
+    overlay.innerHTML = `
+      <div id="admin-input-lock-card">
+        <div id="admin-input-lock-title">Input Locked</div>
+        <div id="admin-input-lock-copy">Controls are disabled for a moment.</div>
+      </div>
+    `;
+    overlay.addEventListener("click", event => event.preventDefault(), true);
+    overlay.addEventListener("pointerdown", event => event.preventDefault(), true);
+    overlay.addEventListener("mousedown", event => event.preventDefault(), true);
+    overlay.addEventListener("touchstart", event => event.preventDefault(), { passive: false, capture: true });
+    document.body.appendChild(overlay);
+
+    inputLockTimeoutId = window.setTimeout(() => {
+      hideInputLockOverlay();
+    }, safeDurationMs);
   }
 
   function ensureVoiceBlastAudioContext() {
@@ -2492,6 +2525,7 @@ document.addEventListener("DOMContentLoaded", () => {
       lastConfettiVersion = Number(state.confettiVersion) || 0;
       lastJumpscareVersion = Number(state.jumpscareVersion) || 0;
       lastVoiceBlastVersion = Number(state.voiceBlastVersion) || 0;
+      lastInputLockVersion = Number(state.inputLockVersion) || 0;
       lastClientRefreshVersion = Number(state.clientRefreshVersion) || 0;
       lastLiveGameSessionId = Number(state.liveGame?.sessionId) || 0;
       hasLoadedEffects = true;
@@ -2527,6 +2561,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (currentVoiceBlastVersion > lastVoiceBlastVersion) {
       triggerAdminVoiceBlast(state.voiceBlastText, currentVoiceBlastVersion);
       lastVoiceBlastVersion = currentVoiceBlastVersion;
+    }
+
+    const currentInputLockVersion = Number(state.inputLockVersion) || 0;
+    if (currentInputLockVersion > lastInputLockVersion) {
+      triggerInputLock(Number(state.inputLockDurationMs) || 5000);
+      lastInputLockVersion = currentInputLockVersion;
     }
 
     const currentClientRefreshVersion = Number(state.clientRefreshVersion) || 0;

@@ -44,6 +44,8 @@ const LIVE_GAME_DEFAULT_DURATION_SECONDS = 45;
 const LIVE_GAME_MAX_DURATION_SECONDS = 300;
 const VOICE_BLAST_MAX_LENGTH = 240;
 const VOICE_BLAST_DEFAULT_VOICE = process.env.VOICE_BLAST_VOICE || "Brian";
+const INPUT_LOCK_DEFAULT_DURATION_MS = 5000;
+const INPUT_LOCK_MAX_DURATION_MS = 15000;
 const siteEffects = {
   effectsRevision: 1,
   bannerText: "",
@@ -58,6 +60,8 @@ const siteEffects = {
   jumpscareVersion: 0,
   voiceBlastText: "",
   voiceBlastVersion: 0,
+  inputLockDurationMs: 0,
+  inputLockVersion: 0,
   maintenanceMode: false,
   maintenanceMessage: DEFAULT_MAINTENANCE_MESSAGE,
   clientRefreshVersion: 0,
@@ -687,6 +691,8 @@ app.get("/api/admin/public-state", (_req, res) => {
     jumpscareVersion: siteEffects.jumpscareVersion,
     voiceBlastText: siteEffects.voiceBlastText,
     voiceBlastVersion: siteEffects.voiceBlastVersion,
+    inputLockDurationMs: siteEffects.inputLockDurationMs,
+    inputLockVersion: siteEffects.inputLockVersion,
     maintenanceMode: siteEffects.maintenanceMode,
     maintenanceMessage: siteEffects.maintenanceMessage,
     clientRefreshVersion: siteEffects.clientRefreshVersion,
@@ -972,6 +978,22 @@ app.post("/api/admin/trigger-voice-blast", requireAdmin, (req, res) => {
     ok: true,
     voiceBlastText: siteEffects.voiceBlastText,
     voiceBlastVersion: siteEffects.voiceBlastVersion,
+  });
+});
+
+app.post("/api/admin/trigger-input-lock", requireAdmin, (req, res) => {
+  const durationMs = Number(req.body?.durationMs);
+  const safeDurationMs = Number.isFinite(durationMs)
+    ? Math.max(1000, Math.min(Math.floor(durationMs), INPUT_LOCK_MAX_DURATION_MS))
+    : INPUT_LOCK_DEFAULT_DURATION_MS;
+
+  markSiteEffectsUpdated();
+  siteEffects.inputLockDurationMs = safeDurationMs;
+  siteEffects.inputLockVersion += 1;
+  return res.json({
+    ok: true,
+    inputLockDurationMs: siteEffects.inputLockDurationMs,
+    inputLockVersion: siteEffects.inputLockVersion,
   });
 });
 
