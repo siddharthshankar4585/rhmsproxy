@@ -19,8 +19,6 @@ try {
 
 const form = document.getElementById("fv");
 const input = document.getElementById("input");
-const PROXY_SEARCH_SESSION_KEY = "proxySearchMode";
-
 if (form && input) {
   form.addEventListener("submit", async event => {
     event.preventDefault();
@@ -34,11 +32,10 @@ if (form && input) {
 }
 function processUrl(value, path) {
   const rawValue = value.trim();
-  const isSearchQuery = !isUrl(rawValue);
   let url = rawValue;
   const engine = localStorage.getItem("engine");
 
-  if (isSearchQuery) {
+  if (!isUrl(rawValue)) {
     url = buildSearchUrl(url, engine);
   } else if (!(url.startsWith("https://") || url.startsWith("http://"))) {
     url = `https://${url}`;
@@ -48,18 +45,6 @@ function processUrl(value, path) {
   if (blockedReason) {
     alert(blockedReason);
     return;
-  }
-
-  if (shouldOpenDirectUrl(url) && !isSearchQuery) {
-    sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
-    window.location.href = url;
-    return;
-  }
-
-  if (isSearchQuery) {
-    sessionStorage.setItem(PROXY_SEARCH_SESSION_KEY, "1");
-  } else {
-    sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
   }
 
   sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(url));

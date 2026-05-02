@@ -1,6 +1,4 @@
 // tabs.js
-const PROXY_SEARCH_SESSION_KEY = "proxySearchMode";
-
 function shouldOpenDirectUrl(url) {
   try {
     const hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
@@ -43,28 +41,11 @@ window.addEventListener("load", () => {
   // Check if there's a URL in sessionStorage (from search redirect)
   const goUrl = sessionStorage.getItem("GoUrl");
   if (goUrl) {
-    const decodedUrl = decodeUvUrl(goUrl);
-    const shouldForceProxySearch = sessionStorage.getItem(PROXY_SEARCH_SESSION_KEY) === "1";
-    if (decodedUrl && shouldOpenDirectUrl(decodedUrl) && !shouldForceProxySearch) {
-      sessionStorage.removeItem("GoUrl");
-      sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
-      window.location.href = decodedUrl;
-      return;
-    }
-
-    if (decodedUrl && /^http(s?):\/\//.test(decodedUrl) && window.location.hostname.toLowerCase().endsWith(".vercel.app") && !shouldForceProxySearch) {
-      sessionStorage.removeItem("GoUrl");
-      sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
-      window.location.href = decodedUrl;
-      return;
-    }
-
     const iframeContainer = document.getElementById("frame-container");
     const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
     if (activeIframe) {
       activeIframe.src = `/a/${goUrl}`;
       sessionStorage.removeItem("GoUrl");
-      sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
     }
   }
   
@@ -72,28 +53,15 @@ window.addEventListener("load", () => {
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const formValue = input.value.trim();
-      const isSearchQuery = !isUrl(formValue);
-      const url = isSearchQuery ? `https://duckduckgo.com/?q=${encodeURIComponent(formValue)}` : prependHttps(formValue);
-      processUrl(url, isSearchQuery);
+      const url = isUrl(formValue) ? prependHttps(formValue) : `https://duckduckgo.com/?q=${encodeURIComponent(formValue)}`;
+      processUrl(url);
     });
   }
-  function processUrl(url, forceProxy = false) {
+  function processUrl(url) {
     const blockedReason = getBlockedReason(url);
     if (blockedReason) {
       alert(blockedReason);
       return;
-    }
-
-    if (shouldOpenDirectUrl(url) && !forceProxy) {
-      sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
-      window.location.href = url;
-      return;
-    }
-
-    if (forceProxy) {
-      sessionStorage.setItem(PROXY_SEARCH_SESSION_KEY, "1");
-    } else {
-      sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
     }
 
     const encoded = __uv$config.encodeUrl(url);
@@ -268,7 +236,6 @@ document.addEventListener("DOMContentLoaded", event => {
       Load();
     });
     const goUrl = sessionStorage.getItem("GoUrl");
-    const shouldForceProxySearch = sessionStorage.getItem(PROXY_SEARCH_SESSION_KEY) === "1";
     const url = sessionStorage.getItem("URL");
 
     if (tabCounter === 0 || tabCounter === 1) {
@@ -276,17 +243,9 @@ document.addEventListener("DOMContentLoaded", event => {
         if (goUrl.includes("/e/")) {
           newIframe.src = window.location.origin + goUrl;
         } else {
-          const decodedGoUrl = decodeUvUrl(goUrl);
-          if (decodedGoUrl && shouldOpenDirectUrl(decodedGoUrl) && !shouldForceProxySearch) {
-            newIframe.src = decodedGoUrl;
-          } else if (/^http(s?):\/\//.test(decodedGoUrl) && window.location.hostname.toLowerCase().endsWith(".vercel.app") && !shouldForceProxySearch) {
-            newIframe.src = decodedGoUrl || "/";
-          } else {
-            newIframe.src = `${window.location.origin}/a/${goUrl}`;
-          }
+          newIframe.src = `${window.location.origin}/a/${goUrl}`;
         }
         sessionStorage.removeItem("GoUrl");
-        sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
       } else {
         newIframe.src = "/";
       }
@@ -302,17 +261,9 @@ document.addEventListener("DOMContentLoaded", event => {
         if (goUrl.includes("/e/")) {
           newIframe.src = window.location.origin + goUrl;
         } else {
-          const decodedGoUrl = decodeUvUrl(goUrl);
-          if (decodedGoUrl && shouldOpenDirectUrl(decodedGoUrl) && !shouldForceProxySearch) {
-            newIframe.src = decodedGoUrl;
-          } else if (/^http(s?):\/\//.test(decodedGoUrl) && window.location.hostname.toLowerCase().endsWith(".vercel.app") && !shouldForceProxySearch) {
-            newIframe.src = decodedGoUrl || "/";
-          } else {
-            newIframe.src = `${window.location.origin}/a/${goUrl}`;
-          }
+          newIframe.src = `${window.location.origin}/a/${goUrl}`;
         }
         sessionStorage.removeItem("GoUrl");
-        sessionStorage.removeItem(PROXY_SEARCH_SESSION_KEY);
       } else {
         newIframe.src = "/";
       }
