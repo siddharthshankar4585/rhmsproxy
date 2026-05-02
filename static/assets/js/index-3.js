@@ -50,13 +50,12 @@ function processUrl(value, path) {
   sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(url));
   const dy = localStorage.getItem("dy");
   const forceDynamic = shouldUseDynamic(url);
+  const encodedUrl = __uv$config.encodeUrl(url);
 
   if (dy === "true" || forceDynamic) {
-    window.location.href = `/a/${__uv$config.encodeUrl(url)}`;
-  } else if (path) {
-    location.href = path;
+    window.location.href = `/a/${encodedUrl}`;
   } else {
-    window.location.href = `/a/${__uv$config.encodeUrl(url)}`;
+    window.location.href = `/a/${encodedUrl}`;
   }
 }
 

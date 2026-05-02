@@ -70,13 +70,7 @@ window.addEventListener("load", () => {
       return;
     }
 
-    sessionStorage.setItem("GoUrl", encoded);
-    const iframeContainer = document.getElementById("frame-container");
-    const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(iframe => iframe.classList.contains("active"));
-    activeIframe.src = `/a/${encoded}`;
-    activeIframe.dataset.tabUrl = url;
-    input.value = url;
-    console.log(activeIframe.dataset.tabUrl);
+    window.location.href = `/a/${encoded}`;
   }
   function isUrl(val = "") {
     if (/^http(s?):\/\//.test(val) || (val.includes(".") && val.substr(0, 1) !== " ")) {
